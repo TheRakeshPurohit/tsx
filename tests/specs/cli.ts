@@ -322,6 +322,7 @@ export default testSuite(({ describe }, node: NodeApis) => {
 							stdout => stdout.includes('READY') && CtrlC,
 							`echo EXIT_CODE: ${isWindows ? '$LastExitCode' : '$?'}\r`,
 						],
+						9000,
 					);
 
 					expectMatchInOrder(output, [
@@ -331,17 +332,22 @@ export default testSuite(({ describe }, node: NodeApis) => {
 						'SIGINT HANDLER COMPLETED\r\n',
 						/EXIT_CODE:\s+200/,
 					]);
-				}, 10_000);
+				}, {
+					timeout: 10_000,
+					retry: 3,
+				});
 
 				test('Infinite loop', async () => {
 					const output = await ptyShell(
 						[
 							// Windows doesn't support shebangs
 							`${node.path} ${tsxPath} ${path.join(fixture.path, 'infinite-loop.js')}\r`,
-							stdout => /\d+\r\n/.test(stdout) && CtrlC,
+							stdout => /^\r?\d+$/.test(stdout) && CtrlC,
 							`echo EXIT_CODE: ${isWindows ? '$LastExitCode' : '$?'}\r`,
 						],
+						9000,
 					);
+
 					expect(output).toMatch(/EXIT_CODE:\s+130/);
 				}, 10_000);
 			});

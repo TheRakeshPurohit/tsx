@@ -1,39 +1,41 @@
 name: 🐛 Bug report
-description: Run into a bug? File a report and get the help you need!
+description: Found a bug? File a report and let's get it fixed!
 labels: [bug, pending triage]
 body:
   - type: markdown
     attributes:
       value: |
-        > 💁‍♂️ Keep in mind this is a collaborative effort. Please do your best to debug, communicate, and demonstrate the problem.
+        💁‍♂️ This is a collaborative effort. Please do your best to debug, communicate, and demonstrate the problem.
 
   - type: checkboxes
     attributes:
       label: Acknowledgements
-      description: Before starting the issue, please make sure you agree to the following.
       options:
-        - label: I searched existing issues before opening this one to avoid duplicates
+        - label: I read the documentation and searched existing issues to avoid duplicates
           required: true
 
-        - label: I understand this is not a place for seek help, but to report a bug
+        - label: I understand this is a place to report a confirmed bug (not seek debugging help)
           required: true
 
-        - label: I understand that the bug must be proven first with a minimal reproduction
+        - label: I understand this is a collaborative open source project, and relies on community contributions
           required: true
 
-        - label: I will be polite, respectful, and considerate of people's time and effort
+        - label: I have read and understood the [Contribution guide](https://github.com/privatenumber/tsx/blob/develop/CONTRIBUTING.md)
           required: true
 
   - type: markdown
     attributes:
       value: |
         ## 📋 Minimal reproduction
-        > ⚠️ **Issue closure warning**: Without a minimal reproduction URL, your issue will be closed & locked without response.
 
-        The minimal reproduction is the core of your issue. Most times, this is all we look at to understand the problem.
+        > [!WARNING]
+        > Without a minimal reproduction, your issue will be closed & locked without response.
 
-        When we debug your reproduction, we start by removing everything unncessary. Including converting TypeScript to JavaScript where possible, and removing _all_ unnecessary files & code (especially inside `node_modules`).
-        Minimizing the scope of the problem helps reveal the root cause.
+        The minimal reproduction is the core of your issue. Most times, this is all we read.
+
+        Start by removing everything unncessary. Including converting TypeScript to JavaScript where possible, and removing _all_ unnecessary files & code (especially inside `node_modules`).
+
+        Minimizing the scope of the problem will reveal the root cause.
 
         <details>
             <summary><strong>Guidelines for creating a Minimal Reproduction</strong></summary>
@@ -64,10 +66,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        > **🙋 Need help?**
-        >
-        > Get personalized help through my [_Priority Support_ service](https://github.com/sponsors/privatenumber).
-        > From minimal reproduction creation to debugging, I'm happy to assist you!
+        > [!TIP]
+        > **🙋 Need help?** Use [_Priority Support_](https://github.com/sponsors/privatenumber) for debugging help and implementation!
 
   - type: markdown
     attributes:
@@ -115,38 +115,42 @@ body:
       value: |
         ## 🗒️ Extra information
 
-        This section is for complex issues that require further explaining.
+        > [!IMPORTANT]
+        > Only fill out this section for more complex issues that require context. I only read this section after validating the reproduction.
 
-        Please focus more on minimizing the reproduction to get to the core of the issue. Usually, that's all we need to look at.
+        Let the code do the talking. Focus more on minimizing the reproduction to get to the core of the issue.
 
   - type: textarea
     attributes:
-      label: Problem & Expected behavior
+      label: Problem & expected behavior (under 200 words)
       value: |
-        Under 200 words:
-        - What happened?
-        - What did you expect instead?
-        - Do you have an error stack trace?
-        - Do you have documentation links?
-        - Do you have screenshots?
+        - What happened
+        - What I expected
+        - Error stack trace
+        - Documentation links
+        - Screenshots
 
   - type: markdown
     attributes:
       value: |
         ## 🛠️ Contribute
-        It would be amazing if you can contribute to the project! This project is open source, free to use, and maintained by volunteers. This could be a great opportunity to give back and improve the project for everyone, including yourself.
+        **Bugs are expected to be fixed by those that are affected by it.**
+
+        Offering financial support for the engineering work will likely speed up the resolution process.
 
   - type: checkboxes
     attributes:
       label: Contributions
       options:
-        - label: I plan to open a pull request for this issue
-        - label: I plan to make a financial contribution to this project
+        - label: I'm interested in working on this issue
+        - label: I'm willing to offer financial support
 
   - type: markdown
     attributes:
       value: |
-        ## 🚀 Need immediate attention?
-        Escalate this issue by becoming a [_Priority Patron_ sponsor](https://github.com/sponsors/privatenumber)! As a _Priority Patron_, your concern will receive prompt attention, ensuring faster and more efficient resolution.
+        ## 🚀 Need immediate help?
+        Escalate this issue by supporting the project as a [_Priority Patron_](https://github.com/sponsors/privatenumber)!
 
-        [👉 Become a _Priority Patron_ now!](https://github.com/sponsors/privatenumber)
+        Your concern will receive prompt attention, ensuring faster and more efficient resolution.
+
+        [→ Become a _Priority Patron_!](https://github.com/sponsors/privatenumber)
