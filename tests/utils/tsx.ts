@@ -1,12 +1,13 @@
 import { fileURLToPath } from 'node:url';
 import { execaNode, type NodeOptions } from 'execa';
-import getNode from 'get-node';
 import {
 	isFeatureSupported,
 	moduleRegister,
 	testRunnerGlob,
+	esmLoadReadFile,
 	type Version,
 } from '../../src/utils/node-features.js';
+import { getNode } from './get-node.js';
 
 type Options = {
 	args: string[];
@@ -45,13 +46,7 @@ export const tsx = (
 export const createNode = async (
 	nodeVersion: string,
 ) => {
-	console.log('Getting node', nodeVersion);
-	const startTime = Date.now();
-	const node = await getNode(nodeVersion, {
-		progress: true,
-	});
-	console.log(`Got node in ${Date.now() - startTime}ms`, node);
-
+	const node = await getNode(nodeVersion);
 	const versionParsed = node.version.split('.').map(Number) as Version;
 	const supports = {
 		moduleRegister: isFeatureSupported(moduleRegister, versionParsed),
@@ -60,6 +55,8 @@ export const createNode = async (
 
 		// https://nodejs.org/docs/latest-v18.x/api/cli.html#--test
 		cliTestFlag: isFeatureSupported([[18, 1, 0]], versionParsed),
+
+		cjsInterop: isFeatureSupported(esmLoadReadFile, versionParsed),
 	};
 	const hookFlag = supports.moduleRegister ? '--import' : '--loader';
 
@@ -73,25 +70,33 @@ export const createNode = async (
 		tsx: (
 			args: string[],
 			cwdOrOptions?: string | NodeOptions,
-		) => execaNode(
-			tsxPath,
-			args,
-			{
-				env: {
-					TSX_DISABLE_CACHE: '1',
-					DEBUG: '1',
+		) => {
+			const isCwd = typeof cwdOrOptions === 'string';
+			return execaNode(
+				tsxPath,
+				args,
+				{
+					nodePath: node.path,
+					nodeOptions: [],
+					reject: false,
+					all: true,
+					...(
+						isCwd
+							? { cwd: cwdOrOptions }
+							: cwdOrOptions
+					),
+					env: {
+						TSX_DISABLE_CACHE: '1',
+						DEBUG: '1',
+						...(
+							(cwdOrOptions && !isCwd)
+								? cwdOrOptions.env
+								: {}
+						),
+					},
 				},
-				nodePath: node.path,
-				nodeOptions: [],
-				reject: false,
-				all: true,
-				...(
-					typeof cwdOrOptions === 'string'
-						? { cwd: cwdOrOptions }
-						: cwdOrOptions
-				),
-			},
-		),
+			);
+		},
 
 		cjsPatched: (
 			args: string[],

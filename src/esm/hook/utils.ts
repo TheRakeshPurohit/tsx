@@ -1,44 +1,18 @@
 import path from 'node:path';
 import type { ModuleFormat } from 'node:module';
-import {
-	getTsconfig,
-	parseTsconfig,
-	createPathsMatcher,
-	createFilesMatcher,
-} from 'get-tsconfig';
+import { tsExtensionsPattern } from '../../utils/path-utils.js';
 import { getPackageType } from './package-json.js';
 
-const tsconfig = (
-	process.env.TSX_TSCONFIG_PATH
-		? {
-			path: path.resolve(process.env.TSX_TSCONFIG_PATH),
-			config: parseTsconfig(process.env.TSX_TSCONFIG_PATH),
-		}
-		: getTsconfig()
-);
-
-export const fileMatcher = tsconfig && createFilesMatcher(tsconfig);
-export const tsconfigPathsMatcher = tsconfig && createPathsMatcher(tsconfig);
-export const allowJs = tsconfig?.config.compilerOptions?.allowJs ?? false;
-
-export const fileProtocol = 'file://';
-
-export const tsExtensionsPattern = /\.([cm]?ts|[tj]sx)($|\?)/;
-
-export const isJsonPattern = /\.json(?:$|\?)/;
-
 const getFormatFromExtension = (fileUrl: string): ModuleFormat | undefined => {
+	[fileUrl] = fileUrl.split('?');
+
 	const extension = path.extname(fileUrl);
 
-	if (extension === '.json') {
-		return 'json';
-	}
-
-	if (extension === '.mjs' || extension === '.mts') {
+	if (extension === '.mts') {
 		return 'module';
 	}
 
-	if (extension === '.cjs' || extension === '.cts') {
+	if (extension === '.cts') {
 		return 'commonjs';
 	}
 };
@@ -55,8 +29,6 @@ export const getFormatFromFileUrl = (fileUrl: string) => {
 		return getPackageType(fileUrl);
 	}
 };
-
-export type MaybePromise<T> = T | Promise<T>;
 
 export const namespaceQuery = 'tsx-namespace=';
 export const getNamespace = (

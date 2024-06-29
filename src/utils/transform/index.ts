@@ -39,19 +39,24 @@ export const transformSync = (
 	filePath: string,
 	extendOptions?: TransformOptions,
 ): Transformed => {
+	const [filePathWithoutQuery, query] = filePath.split('?');
 	const define: { [key: string]: string } = {};
 
-	if (!(filePath.endsWith('.cjs') || filePath.endsWith('.cts'))) {
-		define['import.meta.url'] = JSON.stringify(pathToFileURL(filePath));
+	if (!(filePathWithoutQuery.endsWith('.cjs') || filePathWithoutQuery.endsWith('.cts'))) {
+		define['import.meta.url'] = JSON.stringify(pathToFileURL(filePathWithoutQuery) + (query ? `?${query}` : ''));
 	}
 
 	const esbuildOptions = {
 		...cacheConfig,
 		format: 'cjs',
-		sourcefile: filePath,
+		sourcefile: filePathWithoutQuery,
 		define,
 		banner: '(()=>{',
 		footer: '})()',
+
+		// CJS Annotations for Node. Used by ESM loader for CJS interop
+		platform: 'node',
+
 		...extendOptions,
 	} as const;
 
@@ -68,18 +73,17 @@ export const transformSync = (
 			filePath,
 			code,
 			[
-				// eslint-disable-next-line @typescript-eslint/no-shadow
-				(_filePath, code) => {
+				(_filePath, _code) => {
 					const patchResult = patchOptions(esbuildOptions);
 					let result;
 					try {
-						result = esbuildTransformSync(code, esbuildOptions);
+						result = esbuildTransformSync(_code, esbuildOptions);
 					} catch (error) {
 						throw formatEsbuildError(error as TransformFailure);
 					}
 					return patchResult(result);
 				},
-				transformDynamicImport,
+				(_filePath, _code) => transformDynamicImport(_filePath, _code, true),
 			],
 		);
 
@@ -115,18 +119,17 @@ export const transform = async (
 			filePath,
 			code,
 			[
-				// eslint-disable-next-line @typescript-eslint/no-shadow
-				async (_filePath, code) => {
+				async (_filePath, _code) => {
 					const patchResult = patchOptions(esbuildOptions);
 					let result;
 					try {
-						result = await esbuildTransform(code, esbuildOptions);
+						result = await esbuildTransform(_code, esbuildOptions);
 					} catch (error) {
 						throw formatEsbuildError(error as TransformFailure);
 					}
 					return patchResult(result);
 				},
-				transformDynamicImport,
+				(_filePath, _code) => transformDynamicImport(_filePath, _code, true),
 			],
 		);
 

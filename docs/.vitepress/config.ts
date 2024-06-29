@@ -17,6 +17,14 @@ export default defineConfig({
 
 	head: [
 		[
+			'link',
+			{
+				rel: 'icon',
+				type: 'image/svg+xml',
+				href: '/favicon.svg',
+			},
+		],
+		[
 			'script',
 			{
 				src: 'https://beamanalytics.b-cdn.net/beam.min.js',
@@ -30,7 +38,7 @@ export default defineConfig({
 		siteTitle: 'tsx',
 
 		editLink: {
-			pattern: 'https://github.com/privatenumber/tsx/edit/develop/docs/:path',
+			pattern: 'https://github.com/privatenumber/tsx/edit/master/docs/:path',
 			text: 'Edit this page on GitHub',
 		},
 
@@ -55,10 +63,42 @@ export default defineConfig({
 				]
 			},
 			{
+				text: 'Node.js API',
+				base: '/node',
+				items: [
+					{
+						text: 'Global enhancement',
+						link: '/',
+						items: [
+							{
+								text: 'CommonJS only',
+								link: '/cjs'
+							},
+							{
+								text: 'Module only',
+								link: '/esm'
+							},
+						],
+					},
+					{
+						text: 'Isolated methods',
+						items: [
+							{
+								text: 'tsImport()',
+								link: '/ts-import'
+							},
+							{
+								text: 'tsx.require()',
+								link: '/tsx-require'
+							},
+						],
+					},
+				],
+			},
+			{
 				text: 'Integration',
 				items: [
 					{ text: 'VSCode', link: '/vscode' },
-					{ text: 'Node.js', link: '/node' },
 				]
 			},
 			{

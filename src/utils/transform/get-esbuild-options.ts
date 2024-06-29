@@ -16,12 +16,12 @@ export const cacheConfig = {
 	sourcemap: true,
 
 	/**
-	 * Improve performance by generating smaller source maps
-	 * that doesn't include the original source code
+	 * Improve performance by only generating sourcesContent
+	 * when V8 coverage is enabled
 	 *
 	 * https://esbuild.github.io/api/#sources-content
 	 */
-	sourcesContent: false,
+	sourcesContent: Boolean(process.env.NODE_V8_COVERAGE),
 
 	/**
 	 * Smaller output for cache and marginal performance improvement:
@@ -48,12 +48,14 @@ export const patchOptions = (
 	const originalSourcefile = options.sourcefile;
 
 	if (originalSourcefile) {
-		const extension = path.extname(originalSourcefile);
+		const extension = path.extname(originalSourcefile.split('?')[0]);
 
 		if (extension) {
 			// https://github.com/evanw/esbuild/issues/1932
 			if (extension === '.cts' || extension === '.mts') {
 				options.sourcefile = `${originalSourcefile.slice(0, -3)}ts`;
+			} else if (extension === '.mjs') { // only used by CJS loader
+				options.sourcefile = `${originalSourcefile.slice(0, -3)}js`;
 			}
 		} else {
 			// esbuild errors to detect loader when a file doesn't have an extension

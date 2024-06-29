@@ -1,222 +1,250 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type {
-	ResolveFnOutput, ResolveHookContext,
+	ResolveHook,
+	ResolveHookContext,
 } from 'node:module';
-import { resolveTsPath } from '../../utils/resolve-ts-path.js';
+import type { PackageJson } from 'type-fest';
+import { readJsonFile } from '../../utils/read-json-file.js';
+import { mapTsExtensions } from '../../utils/map-ts-extensions.js';
 import type { NodeError } from '../../types.js';
-import { isRelativePathPattern } from '../../utils/is-relative-path-pattern.js';
+import { tsconfigPathsMatcher, allowJs } from '../../utils/tsconfig.js';
 import {
-	tsconfigPathsMatcher,
+	requestAcceptsQuery,
+	fileUrlPrefix,
 	tsExtensionsPattern,
+	isDirectoryPattern,
+	isBarePackageNamePattern,
+} from '../../utils/path-utils.js';
+import {
 	getFormatFromFileUrl,
-	fileProtocol,
-	allowJs,
 	namespaceQuery,
 	getNamespace,
-	type MaybePromise,
 } from './utils.js';
 import { data } from './initialize.js';
 
-const isDirectoryPattern = /\/(?:$|\?)/;
+type NextResolve = Parameters<ResolveHook>[2];
 
-type NextResolve = (
-	specifier: string,
-	context?: ResolveHookContext,
-) => MaybePromise<ResolveFnOutput>;
-
-type resolve = (
-	specifier: string,
-	context: ResolveHookContext,
-	nextResolve: NextResolve,
-	recursiveCall?: boolean,
-) => MaybePromise<ResolveFnOutput>;
-
-const resolveExplicitPath = async (
-	nextResolve: NextResolve,
-	specifier: string,
-	context: ResolveHookContext,
+const getMissingPathFromNotFound = (
+	nodeError: NodeError,
 ) => {
-	const resolved = await nextResolve(specifier, context);
-
-	if (
-		!resolved.format
-		&& resolved.url.startsWith(fileProtocol)
-	) {
-		resolved.format = await getFormatFromFileUrl(resolved.url);
+	if (nodeError.url) {
+		return nodeError.url;
 	}
 
-	return resolved;
+	const isExportPath = nodeError.message.match(/^Cannot find module '([^']+)'/);
+	if (isExportPath) {
+		const [, exportPath] = isExportPath;
+		return exportPath;
+	}
+
+	const isPackagePath = nodeError.message.match(/^Cannot find package '([^']+)'/);
+	if (isPackagePath) {
+		const [, packageJsonPath] = isPackagePath;
+		const packageJsonUrl = pathToFileURL(packageJsonPath);
+
+		if (!packageJsonUrl.pathname.endsWith('/package.json')) {
+			packageJsonUrl.pathname += '/package.json';
+		}
+
+		const packageJson = readJsonFile<PackageJson>(packageJsonUrl);
+		if (packageJson?.main) {
+			return new URL(packageJson.main, packageJsonUrl).toString();
+		}
+	}
 };
 
-const extensions = ['.js', '.json', '.ts', '.tsx', '.jsx'] as const;
-
-const tryExtensions = async (
-	specifier: string,
+const resolveExtensions = async (
+	url: string,
 	context: ResolveHookContext,
 	nextResolve: NextResolve,
+	throwError?: boolean,
 ) => {
-	const [specifierWithoutQuery, query] = specifier.split('?');
-	let throwError: Error | undefined;
-	for (const extension of extensions) {
+	const tryPaths = mapTsExtensions(url, true);
+	if (!tryPaths) {
+		return;
+	}
+
+	let caughtError: unknown;
+	for (const tsPath of tryPaths) {
 		try {
-			return await resolveExplicitPath(
-				nextResolve,
-				specifierWithoutQuery + extension + (query ? `?${query}` : ''),
-				context,
-			);
-		} catch (_error) {
+			return await nextResolve(tsPath, context);
+		} catch (error) {
+			const { code } = error as NodeError;
 			if (
-				throwError === undefined
-				&& _error instanceof Error
+				code !== 'ERR_MODULE_NOT_FOUND'
+				&& code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED'
 			) {
-				const { message } = _error;
-				_error.message = _error.message.replace(`${extension}'`, "'");
-				_error.stack = _error.stack!.replace(message, _error.message);
-				throwError = _error;
+				throw error;
 			}
+
+			caughtError = error;
 		}
 	}
 
-	throw throwError;
-};
-
-const tryDirectory = async (
-	specifier: string,
-	context: ResolveHookContext,
-	nextResolve: NextResolve,
-) => {
-	const isExplicitDirectory = isDirectoryPattern.test(specifier);
-	const appendIndex = isExplicitDirectory ? 'index' : '/index';
-	const [specifierWithoutQuery, query] = specifier.split('?');
-
-	try {
-		return await tryExtensions(
-			specifierWithoutQuery + appendIndex + (query ? `?${query}` : ''),
-			context,
-			nextResolve,
-		);
-	} catch (_error) {
-		if (!isExplicitDirectory) {
-			try {
-				return await tryExtensions(specifier, context, nextResolve);
-			} catch {}
-		}
-
-		const error = _error as Error;
-		const { message } = error;
-		error.message = error.message.replace(`${appendIndex.replace('/', path.sep)}'`, "'");
-		error.stack = error.stack!.replace(message, error.message);
-		throw error;
+	if (throwError) {
+		throw caughtError;
 	}
 };
 
-export const resolve: resolve = async (
+const resolveBase: ResolveHook = async (
 	specifier,
 	context,
 	nextResolve,
-	recursiveCall,
 ) => {
-	if (!data.active) {
-		return nextResolve(specifier, context);
-	}
-
-	const isPath = (
-		specifier.startsWith(fileProtocol)
-		|| isRelativePathPattern.test(specifier)
-	);
-
-	// bare specifier
-	if (!isPath) {
-		// TS path alias
-		if (
-			tsconfigPathsMatcher
-			&& !context.parentURL?.includes('/node_modules/')
-		) {
-			const possiblePaths = tsconfigPathsMatcher(specifier);
-			for (const possiblePath of possiblePaths) {
-				try {
-					return await resolve(
-						pathToFileURL(possiblePath).toString(),
-						context,
-						nextResolve,
-					);
-				} catch {}
-			}
-		}
-
-		// npm package -- use default resolution
-		return nextResolve(specifier, context);
-	}
-
-	// Inherit namespace from parent
-	let requestNamespace = getNamespace(specifier);
-	if (context.parentURL) {
-		const parentNamespace = getNamespace(context.parentURL);
-		if (parentNamespace && !requestNamespace) {
-			requestNamespace = parentNamespace;
-			specifier += `${specifier.includes('?') ? '&' : '?'}${namespaceQuery}${parentNamespace}`;
-		}
-	}
-
-	if (data.namespace && data.namespace !== requestNamespace) {
-		return nextResolve(specifier, context);
-	}
-
 	// If directory, can be index.js, index.ts, etc.
-	if (isDirectoryPattern.test(specifier)) {
-		return await tryDirectory(specifier, context, nextResolve);
+
+	// Resolve TS alias
+	// Bare specifier
+	if (
+		!requestAcceptsQuery(specifier)
+		// TS path alias
+		&& tsconfigPathsMatcher
+		&& !context.parentURL?.includes('/node_modules/')
+	) {
+		const possiblePaths = tsconfigPathsMatcher(specifier);
+		for (const possiblePath of possiblePaths) {
+			try {
+				return await resolveBase(
+					pathToFileURL(possiblePath).toString(),
+					context,
+					nextResolve,
+				);
+			} catch {}
+		}
 	}
+
+	const isBarePackageName = isBarePackageNamePattern.test(specifier);
 
 	// Typescript gives .ts, .cts, or .mts priority over actual .js, .cjs, or .mjs extensions
 	//
 	// If `allowJs` is set in `tsconfig.json`, then we'll apply the same resolution logic
 	// to files without a TypeScript extension.
-	if (tsExtensionsPattern.test(context.parentURL!) || allowJs) {
-		const tsPaths = resolveTsPath(specifier);
-		if (tsPaths) {
-			for (const tsPath of tsPaths) {
-				try {
-					return await resolveExplicitPath(nextResolve, tsPath, context);
-					// return await resolve(tsPath, context, nextResolve, true);
-				} catch (error) {
-					const { code } = error as NodeError;
-					if (
-						code !== 'ERR_MODULE_NOT_FOUND'
-						&& code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED'
-					) {
-						throw error;
-					}
-				}
-			}
+	if (
+		// Ignore if there's no subpath to test extensions against
+		!isBarePackageName
+		&& (
+			tsExtensionsPattern.test(context.parentURL!)
+			|| allowJs
+		)
+	) {
+		const resolved = await resolveExtensions(specifier, context, nextResolve);
+		if (resolved) {
+			return resolved;
 		}
 	}
 
 	try {
-		return await resolveExplicitPath(nextResolve, specifier, context);
+		return await nextResolve(specifier, context);
 	} catch (error) {
-		if (
-			error instanceof Error
-			&& !recursiveCall
-		) {
-			const { code } = error as NodeError;
-			if (code === 'ERR_UNSUPPORTED_DIR_IMPORT') {
-				try {
-					return await tryDirectory(specifier, context, nextResolve);
-				} catch (error_) {
-					if ((error_ as NodeError).code !== 'ERR_PACKAGE_IMPORT_NOT_DEFINED') {
-						throw error_;
+		if (error instanceof Error) {
+			const nodeError = error as NodeError;
+			if (nodeError.code === 'ERR_MODULE_NOT_FOUND') {
+				// Resolving .js -> .ts in exports/imports map
+				const errorPath = getMissingPathFromNotFound(nodeError);
+				if (errorPath) {
+					const resolved = await resolveExtensions(errorPath, context, nextResolve);
+					if (resolved) {
+						return resolved;
 					}
 				}
-			}
-
-			if (code === 'ERR_MODULE_NOT_FOUND') {
-				try {
-					return await tryExtensions(specifier, context, nextResolve);
-				} catch {}
 			}
 		}
 
 		throw error;
 	}
+};
+
+const resolveDirectory: ResolveHook = async (
+	specifier,
+	context,
+	nextResolve,
+) => {
+	const [specifierWithoutQuery, query] = specifier.split('?');
+
+	if (isDirectoryPattern.test(specifier)) {
+		return (await resolveExtensions(
+			`${specifierWithoutQuery}index${query ? `?${query}` : ''}`,
+			context,
+			nextResolve,
+			true,
+		))!;
+	}
+
+	try {
+		return await resolveBase(specifier, context, nextResolve);
+	} catch (error) {
+		if (error instanceof Error) {
+			const nodeError = error as NodeError;
+			if (nodeError.code === 'ERR_UNSUPPORTED_DIR_IMPORT') {
+				const errorPath = getMissingPathFromNotFound(nodeError);
+				if (errorPath) {
+					try {
+						return (await resolveExtensions(
+							`${errorPath}/index${query ? `?${query}` : ''}`,
+							context,
+							nextResolve,
+							true,
+						))!;
+					} catch (_error) {
+						const __error = _error as Error;
+						const { message } = __error;
+						__error.message = __error.message.replace(`${'/index'.replace('/', path.sep)}'`, "'");
+						__error.stack = __error.stack!.replace(message, __error.message);
+						throw __error;
+					}
+				}
+			}
+		}
+
+		throw error;
+	}
+};
+
+export const resolve: ResolveHook = async (
+	specifier,
+	context,
+	nextResolve,
+) => {
+	if (!data.active || specifier.startsWith('node:')) {
+		return nextResolve(specifier, context);
+	}
+
+	const requestNamespace = getNamespace(specifier) ?? (
+		// Inherit namespace from parent
+		context.parentURL && getNamespace(context.parentURL)
+	);
+
+	if (data.namespace && data.namespace !== requestNamespace) {
+		return nextResolve(specifier, context);
+	}
+
+	const resolved = await resolveDirectory(
+		specifier,
+		context,
+		nextResolve,
+	);
+
+	if (resolved.format === 'builtin') {
+		return resolved;
+	}
+
+	if (
+		!resolved.format
+		// Filter out data: (sourcemaps)
+		&& resolved.url.startsWith(fileUrlPrefix)
+	) {
+		resolved.format = await getFormatFromFileUrl(resolved.url);
+	}
+
+	// Inherit namespace
+	if (
+		requestNamespace
+		&& !resolved.url.includes(namespaceQuery)
+		&& requestAcceptsQuery(resolved.url)
+	) {
+		resolved.url += (resolved.url.includes('?') ? '&' : '?') + namespaceQuery + requestNamespace;
+	}
+
+	return resolved;
 };

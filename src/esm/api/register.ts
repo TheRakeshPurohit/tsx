@@ -1,20 +1,53 @@
 import module from 'node:module';
 import { MessageChannel, type MessagePort } from 'node:worker_threads';
 import type { Message } from '../types.js';
+import type { RequiredProperty } from '../../types.js';
+import { interopCjsExports } from '../../cjs/api/module-resolve-filename.js';
+import { createScopedImport, type ScopedImport } from './scoped-import.js';
 
-type Options = {
-	namespace?: string;
-	onImport?: (url: string) => void;
-};
+export type TsconfigOptions = false | string;
 
 export type InitializationOptions = {
 	namespace?: string;
 	port?: MessagePort;
+	tsconfig?: TsconfigOptions;
 };
 
-export const register = (
-	options?: Options,
+export type RegisterOptions = {
+	namespace?: string;
+	onImport?: (url: string) => void;
+	tsconfig?: TsconfigOptions;
+};
+
+export type Unregister = () => Promise<void>;
+
+export type NamespacedUnregister = Unregister & {
+	import: ScopedImport;
+	unregister: Unregister;
+};
+
+export type Register = {
+	(options: RequiredProperty<RegisterOptions, 'namespace'>): NamespacedUnregister;
+	(options?: RegisterOptions): Unregister;
+};
+
+let cjsInteropApplied = false;
+
+export const register: Register = (
+	options,
 ) => {
+	if (!module.register) {
+		throw new Error(`This version of Node.js (${process.version}) does not support module.register(). Please upgrade to Node v18.19 or v20.6 and above.`);
+	}
+
+	if (!cjsInteropApplied) {
+		const { _resolveFilename } = module;
+		module._resolveFilename = (
+			request, _parent, _isMain, _options,
+		) => _resolveFilename(interopCjsExports(request), _parent, _isMain, _options);
+		cjsInteropApplied = true;
+	}
+
 	const { sourceMapsEnabled } = process;
 	process.setSourceMapsEnabled(true);
 
@@ -25,8 +58,9 @@ export const register = (
 		{
 			parentURL: import.meta.url,
 			data: {
-				namespace: options?.namespace,
 				port: port2,
+				namespace: options?.namespace,
+				tsconfig: options?.tsconfig,
 			} satisfies InitializationOptions,
 			transferList: [port2],
 		},
@@ -45,7 +79,7 @@ export const register = (
 	}
 
 	// unregister
-	return () => {
+	const unregister = () => {
 		if (sourceMapsEnabled === false) {
 			process.setSourceMapsEnabled(false);
 		}
@@ -67,4 +101,11 @@ export const register = (
 			port1.on('message', onDeactivated);
 		});
 	};
+
+	if (options?.namespace) {
+		unregister.import = createScopedImport(options.namespace);
+		unregister.unregister = unregister;
+	}
+
+	return unregister;
 };

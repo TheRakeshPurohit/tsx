@@ -1,79 +1,100 @@
 import path from 'node:path';
 import Module from 'node:module';
-import { createPathsMatcher } from 'get-tsconfig';
-import { resolveTsPath } from '../../utils/resolve-ts-path.js';
+import { fileURLToPath } from 'node:url';
+import { mapTsExtensions } from '../../utils/map-ts-extensions.js';
 import type { NodeError } from '../../types.js';
-import { isRelativePathPattern } from '../../utils/is-relative-path-pattern.js';
-import {
-	isTsFilePatten,
-	tsconfig,
-} from './utils.js';
+import { isRelativePath, fileUrlPrefix, tsExtensionsPattern } from '../../utils/path-utils.js';
+import { tsconfigPathsMatcher, allowJs } from '../../utils/tsconfig.js';
+import { urlSearchParamsStringify } from '../../utils/url-search-params-stringify.js';
+import type { ResolveFilename, SimpleResolve, LoaderState } from './types.js';
+import { createImplicitResolver } from './resolve-implicit-extensions.js';
 
 const nodeModulesPath = `${path.sep}node_modules${path.sep}`;
 
-const tsconfigPathsMatcher = tsconfig && createPathsMatcher(tsconfig);
+const getOriginalFilePath = (
+	request: string,
+) => {
+	if (!request.startsWith('data:text/javascript,')) {
+		return;
+	}
 
-type ResolveFilename = typeof Module._resolveFilename;
+	const queryIndex = request.indexOf('?');
+	if (queryIndex === -1) {
+		return;
+	}
 
-const defaultResolver = Module._resolveFilename.bind(Module);
+	const searchParams = new URLSearchParams(request.slice(queryIndex + 1));
+	const filePath = searchParams.get('filePath');
+	if (filePath) {
+		return filePath;
+	}
+};
+
+export const interopCjsExports = (
+	request: string,
+) => {
+	const filePath = getOriginalFilePath(request);
+	if (filePath) {
+		// The CJS module cache needs to be updated with the actual path for export parsing to work
+		// https://github.com/nodejs/node/blob/v22.2.0/lib/internal/modules/esm/translators.js#L338
+		Module._cache[filePath] = Module._cache[request];
+		delete Module._cache[request];
+		request = filePath;
+	}
+	return request;
+};
 
 /**
  * Typescript gives .ts, .cts, or .mts priority over actual .js, .cjs, or .mjs extensions
  */
 const resolveTsFilename = (
+	resolve: SimpleResolve,
 	request: string,
-	parent: Module.Parent,
-	isMain: boolean,
-	options?: Record<PropertyKey, unknown>,
+	parent: Module.Parent | undefined,
 ) => {
-	const tsPath = resolveTsPath(request);
-
 	if (
-		parent?.filename
-		&& (
-			isTsFilePatten.test(parent.filename)
-			|| tsconfig?.config.compilerOptions?.allowJs
-		)
-		&& tsPath
+		!(parent?.filename && tsExtensionsPattern.test(parent.filename))
+		&& !allowJs
 	) {
-		for (const tryTsPath of tsPath) {
-			try {
-				return defaultResolver(
-					tryTsPath,
-					parent,
-					isMain,
-					options,
-				);
-			} catch (error) {
-				const { code } = error as NodeError;
-				if (
-					code !== 'MODULE_NOT_FOUND'
-					&& code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED'
-				) {
-					throw error;
-				}
+		return;
+	}
+
+	const tsPath = mapTsExtensions(request);
+	if (!tsPath) {
+		return;
+	}
+
+	for (const tryTsPath of tsPath) {
+		try {
+			return resolve(tryTsPath);
+		} catch (error) {
+			const { code } = error as NodeError;
+			if (
+				code !== 'MODULE_NOT_FOUND'
+				&& code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED'
+			) {
+				throw error;
 			}
 		}
 	}
 };
 
-export const resolveFilename: ResolveFilename = (
-	request,
-	parent,
-	isMain,
-	options,
+const resolveRequest = (
+	request: string,
+	parent: Module.Parent | undefined,
+	resolve: SimpleResolve,
 ) => {
-	// Strip query string
-	const queryIndex = request.indexOf('?');
-	if (queryIndex !== -1) {
-		request = request.slice(0, queryIndex);
+	// Support file protocol
+	if (request.startsWith(fileUrlPrefix)) {
+		request = fileURLToPath(request);
 	}
 
+	// Resolve TS path alias
 	if (
 		tsconfigPathsMatcher
 
 		// bare specifier
-		&& !isRelativePathPattern.test(request)
+		&& !isRelativePath(request)
 
 		// Dependency paths should not be resolved using tsconfig.json
 		&& !parent?.filename?.includes(nodeModulesPath)
@@ -81,26 +102,128 @@ export const resolveFilename: ResolveFilename = (
 		const possiblePaths = tsconfigPathsMatcher(request);
 
 		for (const possiblePath of possiblePaths) {
-			const tsFilename = resolveTsFilename(possiblePath, parent, isMain, options);
+			const tsFilename = resolveTsFilename(resolve, possiblePath, parent);
 			if (tsFilename) {
 				return tsFilename;
 			}
 
 			try {
-				return defaultResolver(
-					possiblePath,
-					parent,
-					isMain,
-					options,
-				);
+				return resolve(possiblePath);
 			} catch {}
 		}
 	}
 
-	const tsFilename = resolveTsFilename(request, parent, isMain, options);
-	if (tsFilename) {
-		return tsFilename;
+	// If extension exists
+	const resolvedTsFilename = resolveTsFilename(resolve, request, parent);
+	if (resolvedTsFilename) {
+		return resolvedTsFilename;
 	}
 
-	return defaultResolver(request, parent, isMain, options);
+	try {
+		return resolve(request);
+	} catch (error) {
+		const nodeError = error as NodeError;
+
+		// Exports map resolution
+		if (
+			nodeError.code === 'MODULE_NOT_FOUND'
+			&& typeof nodeError.path === 'string'
+			&& nodeError.path.endsWith(`${path.sep}package.json`)
+		) {
+			const isExportsPath = nodeError.message.match(/^Cannot find module '([^']+)'$/);
+			if (isExportsPath) {
+				const exportsPath = isExportsPath[1];
+				const tsFilename = resolveTsFilename(resolve, exportsPath, parent);
+				if (tsFilename) {
+					return tsFilename;
+				}
+			}
+
+			const isMainPath = nodeError.message.match(/^Cannot find module '([^']+)'. Please verify that the package.json has a valid "main" entry$/);
+			if (isMainPath) {
+				const mainPath = isMainPath[1];
+				const tsFilename = resolveTsFilename(resolve, mainPath, parent);
+				if (tsFilename) {
+					return tsFilename;
+				}
+			}
+		}
+
+		throw nodeError;
+	}
+};
+
+export const createResolveFilename = (
+	state: LoaderState,
+	nextResolve: ResolveFilename,
+	namespace?: string,
+): ResolveFilename => (
+	request,
+	parent,
+	isMain,
+	options,
+) => {
+	if (state.enabled === false) {
+		return nextResolve(request, parent, isMain, options);
+	}
+
+	const resolve: SimpleResolve = request_ => nextResolve(
+		request_,
+		parent,
+		isMain,
+		options,
+	);
+
+	request = interopCjsExports(request);
+
+	if (parent?.filename) {
+		const filePath = getOriginalFilePath(parent.filename);
+		if (filePath) {
+			parent.filename = filePath.split('?')[0];
+		}
+	}
+
+	// Strip query string
+	const requestAndQuery = request.split('?');
+	const searchParams = new URLSearchParams(requestAndQuery[1]);
+
+	// Inherit parent namespace if it exists
+	if (parent?.filename) {
+		const parentQuery = new URLSearchParams(parent.filename.split('?')[1]);
+		const parentNamespace = parentQuery.get('namespace');
+		if (parentNamespace) {
+			searchParams.append('namespace', parentNamespace);
+		}
+	}
+
+	// If request namespace doesnt match the namespace, ignore
+	if ((searchParams.get('namespace') ?? undefined) !== namespace) {
+		return resolve(request);
+	}
+
+	if (namespace) {
+		/**
+		 * When namespaced, the loaders are registered to the extensions in a hidden way
+		 * so Node's built-in resolver will not try those extensions
+		 *
+		 * To support implicit extensions, we need to enhance the resolver with our own
+		 * re-implementation of the implicit extension resolution
+		 */
+		nextResolve = createImplicitResolver(nextResolve);
+	}
+
+	let resolved = resolveRequest(requestAndQuery[0], parent, resolve);
+
+	// Only add query back if it's a file path (not a core Node module)
+	if (
+		path.isAbsolute(resolved)
+
+			// These two have native loaders which don't support queries
+			&& !resolved.endsWith('.json')
+			&& !resolved.endsWith('.node')
+	) {
+		resolved += urlSearchParamsStringify(searchParams);
+	}
+
+	return resolved;
 };

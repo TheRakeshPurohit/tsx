@@ -1,32 +1,10 @@
-import { pathToFileURL } from 'node:url';
-import { register } from './register.js';
-
-const resolveSpecifier = (
-	specifier: string,
-	fromFile: string,
-	namespace: string,
-) => {
-	const base = (
-		fromFile.startsWith('file://')
-			? fromFile
-			: pathToFileURL(fromFile)
-	);
-	const resolvedUrl = new URL(specifier, base);
-
-	/**
-	 * A namespace query is added so we get our own module cache
-	 *
-	 * I considered using an import attribute for this, but it doesn't seem to
-	 * make the request unique so it gets cached.
-	 */
-	resolvedUrl.searchParams.set('tsx-namespace', namespace);
-
-	return resolvedUrl.toString();
-};
+import { register as cjsRegister } from '../../cjs/api/index.js';
+import { register, type TsconfigOptions } from './register.js';
 
 type Options = {
 	parentURL: string;
 	onImport?: (url: string) => void;
+	tsconfig?: TsconfigOptions;
 };
 const tsImport = (
 	specifier: string,
@@ -42,7 +20,11 @@ const tsImport = (
 	const isOptionsString = typeof options === 'string';
 	const parentURL = isOptionsString ? options : options.parentURL;
 	const namespace = Date.now().toString();
-	const resolvedUrl = resolveSpecifier(specifier, parentURL, namespace);
+
+	// Keep registered for hanging require() calls
+	cjsRegister({
+		namespace,
+	});
 
 	/**
 	 * We don't want to unregister this after load since there can be child import() calls
@@ -50,11 +32,16 @@ const tsImport = (
 	 *
 	 * This is not accessible to others because of the namespace
 	 */
-	register({
+	const api = register({
 		namespace,
-		onImport: isOptionsString ? undefined : options.onImport,
+		...(
+			isOptionsString
+				? {}
+				: options
+		),
 	});
-	return import(resolvedUrl);
+
+	return api.import(specifier, parentURL);
 };
 
 /**
