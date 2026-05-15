@@ -1,6 +1,6 @@
 import { setTimeout } from 'node:timers/promises';
 import {
-	describe, test, onFinish, onTestFinish, onTestFail, expect,
+	describe, test, onFinish, onTestFinish, onTestFail, expect, skip,
 } from 'manten';
 import { createFixture } from 'fs-fixture';
 import type { NodeApis } from '../utils/tsx.js';
@@ -115,6 +115,12 @@ export const watch = ({ tsx }: NodeApis) => describe('watch', async () => {
 	}, 10_000);
 
 	await test('wait for exit', async () => {
+		if (process.platform === 'win32') {
+			// Windows child kills are abrupt, so SIGTERM cannot exercise exit handlers.
+			// https://github.com/nodejs/node/blob/v24.15.0/doc/api/child_process.md#L1720-L1722
+			skip('Windows kills child processes abruptly');
+		}
+
 		const fixtureExit = await createFixture({
 			'index.js': `
 			console.log('start');

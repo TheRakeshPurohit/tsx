@@ -305,6 +305,182 @@ export const versionSensitiveTests = (node: NodeApis) => describe('Version-sensi
 		expect(tsxProcess.stderr).toBe('');
 	});
 
+	if (node.supports.requireEsm) {
+		test('require(esm) supports module.exports interop export', async () => {
+			const jsModuleSource = (extension: string) => `
+				const value = ${JSON.stringify(`module exports ${extension}`)};
+				export { value as "module.exports" };
+				export const named = ${JSON.stringify(`named ${extension}`)};
+				export default ${JSON.stringify(`default ${extension}`)};
+				`;
+			const tsModuleSource = (extension: string) => `
+				const value: string = ${JSON.stringify(`module exports ${extension}`)};
+				export { value as "module.exports" };
+				export const named = ${JSON.stringify(`named ${extension}`)};
+				export default ${JSON.stringify(`default ${extension}`)};
+				`;
+
+			await using fixture = await createFixture({
+				'package.json': createPackageJson({ type: 'module' }),
+				'load-js.cjs': `
+					const load = async (extension) => {
+						const required = require(\`./module.\${extension}\`);
+						const imported = await import(\`./module.\${extension}\`);
+						return {
+							imported,
+							required,
+						};
+					};
+
+					(async () => {
+						console.log(JSON.stringify({
+							js: await load('js'),
+							mjs: await load('mjs'),
+						}));
+					})();
+					`,
+				'load-all.cjs': `
+					const load = async (extension) => {
+						const required = require(\`./module.\${extension}\`);
+						const imported = await import(\`./module.\${extension}\`);
+						return {
+							imported,
+							required,
+						};
+					};
+
+					(async () => {
+						console.log(JSON.stringify({
+							js: await load('js'),
+							mjs: await load('mjs'),
+							mts: await load('mts'),
+							ts: await load('ts'),
+						}));
+					})();
+					`,
+				'load-cjs-style-typescript.cjs': `
+					const required = require("./cjs-style.ts");
+
+					console.log(JSON.stringify(required));
+					`,
+				'load-commonjs-package.cjs': `
+					console.log(JSON.stringify({
+						js: require("./commonjs/module.js"),
+						ts: require("./commonjs/module.ts"),
+					}));
+					`,
+				'module.mjs': jsModuleSource('mjs'),
+				'module.js': jsModuleSource('js'),
+				'module.mts': tsModuleSource('mts'),
+				'module.ts': tsModuleSource('ts'),
+				'commonjs/package.json': createPackageJson({ type: 'commonjs' }),
+				'commonjs/module.js': jsModuleSource('commonjs js'),
+				'commonjs/module.ts': tsModuleSource('commonjs ts'),
+				'cjs-style.ts': `
+					import path = require("node:path");
+
+					module.exports = {
+						"module.exports": path.basename(__filename),
+						named: "named cjs-style ts",
+					};
+					`,
+			});
+
+			const nativeProcess = await execaNode(fixture.getPath('load-js.cjs'), [], {
+				nodePath: node.path,
+				nodeOptions: [],
+				reject: false,
+			});
+			expect(nativeProcess.exitCode).toBe(0);
+			if (node.supports.requireEsmNoWarning) {
+				expect(nativeProcess.stderr).toBe('');
+			} else {
+				expect(nativeProcess.stderr).toContain('ExperimentalWarning');
+				expect(nativeProcess.stderr).toContain('Support for loading ES Module in require()');
+			}
+			expect(JSON.parse(nativeProcess.stdout)).toEqual({
+				js: {
+					imported: {
+						default: 'default js',
+						'module.exports': 'module exports js',
+						named: 'named js',
+					},
+					required: 'module exports js',
+				},
+				mjs: {
+					imported: {
+						default: 'default mjs',
+						'module.exports': 'module exports mjs',
+						named: 'named mjs',
+					},
+					required: 'module exports mjs',
+				},
+			});
+
+			const tsxProcess = await node.tsx(['load-all.cjs'], fixture.path);
+			expect(tsxProcess.exitCode).toBe(0);
+			expect(tsxProcess.stderr).toBe('');
+			expect(JSON.parse(tsxProcess.stdout)).toEqual({
+				js: {
+					imported: {
+						default: 'default js',
+						'module.exports': 'module exports js',
+						named: 'named js',
+					},
+					required: 'module exports js',
+				},
+				mjs: {
+					imported: {
+						default: 'default mjs',
+						'module.exports': 'module exports mjs',
+						named: 'named mjs',
+					},
+					required: 'module exports mjs',
+				},
+				mts: {
+					imported: {
+						default: 'default mts',
+						'module.exports': 'module exports mts',
+						named: 'named mts',
+					},
+					required: 'module exports mts',
+				},
+				ts: {
+					imported: {
+						default: 'default ts',
+						'module.exports': 'module exports ts',
+						named: 'named ts',
+					},
+					required: 'module exports ts',
+				},
+			});
+
+			const cjsStyleTypeScriptProcess = await node.tsx(['load-cjs-style-typescript.cjs'], fixture.path);
+			expect(cjsStyleTypeScriptProcess.exitCode).toBe(0);
+			expect(cjsStyleTypeScriptProcess.stderr).toBe('');
+			expect(JSON.parse(cjsStyleTypeScriptProcess.stdout)).toEqual({
+				'module.exports': 'cjs-style.ts',
+				named: 'named cjs-style ts',
+			});
+
+			const commonjsPackageProcess = await node.tsx(['load-commonjs-package.cjs'], fixture.path);
+			expect(commonjsPackageProcess.exitCode).toBe(0);
+			expect(commonjsPackageProcess.stderr).toBe('');
+			expect(JSON.parse(commonjsPackageProcess.stdout)).toEqual({
+				js: {
+					default: 'default commonjs js',
+					'module.exports': 'module exports commonjs js',
+					named: 'named commonjs js',
+				},
+				ts: {
+					default: 'default commonjs ts',
+					'module.exports': 'module exports commonjs ts',
+					named: 'named commonjs ts',
+				},
+			});
+		});
+	}
+
 	test('import.meta path properties follow Node file module support', async () => {
 		await using fixture = await createFixture({
 			'direct.js': `

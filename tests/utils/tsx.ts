@@ -12,6 +12,7 @@ import {
 	testRunnerGlob,
 	requireEsmExtensionlessMjs,
 	requireEsm,
+	requireEsmNoWarning,
 	cjsNamespaceModuleExports,
 	nativeTypeScript,
 	wasmModules,
@@ -106,6 +107,8 @@ export const createNode = async (
 		wasmModules: isFeatureSupported(wasmModules, versionParsed),
 
 		requireEsm: isFeatureSupported(requireEsm, versionParsed),
+
+		requireEsmNoWarning: isFeatureSupported(requireEsmNoWarning, versionParsed),
 
 		requireEsmExtensionlessMjs: isFeatureSupportedInRange(
 			requireEsmExtensionlessMjs,

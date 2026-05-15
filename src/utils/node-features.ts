@@ -104,6 +104,16 @@ export const requireEsm: Version[] = [
 	[23, 0, 0],
 ];
 
+// https://github.com/nodejs/node/pull/56194
+// https://github.com/nodejs/node/blob/v20.19.0/doc/changelogs/CHANGELOG_V20.md#L114
+// https://github.com/nodejs/node/blob/v22.13.0/doc/changelogs/CHANGELOG_V22.md#L87
+// https://github.com/nodejs/node/blob/v23.5.0/doc/changelogs/CHANGELOG_V23.md#L119
+export const requireEsmNoWarning: Version[] = [
+	[20, 19, 0],
+	[22, 13, 0],
+	[23, 5, 0],
+];
+
 // Node v23 exposes CJS module.exports on the synthetic ESM namespace.
 // https://github.com/nodejs/node/pull/57366
 // https://github.com/nodejs/node/blob/v23.0.0/lib/internal/modules/esm/translators.js#L187-L224

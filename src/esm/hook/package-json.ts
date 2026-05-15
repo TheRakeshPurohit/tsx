@@ -122,3 +122,10 @@ export const getPackageTypeSync = (
 	const packageJson = findPackageJsonSync(filePath);
 	return packageJson?.type ?? 'commonjs';
 };
+
+export const getNearestPackageTypeSync = (
+	filePath: string,
+) => {
+	const packageJson = findPackageJsonSync(filePath);
+	return packageJson?.type;
+};
