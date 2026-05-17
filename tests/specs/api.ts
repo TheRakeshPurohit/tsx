@@ -763,6 +763,9 @@ export const api = (node: NodeApis) => describe('API', () => {
 							const { message } = await tsImport('./file.ts', __filename);
 							console.log(message);
 
+							const { message: mtsMessage } = await tsImport('./file.mts', __filename);
+							console.log(mtsMessage);
+
 							const { message: message2 } = await tsImport('./file.ts?with-query', __filename);
 							console.log(message2);
 
@@ -780,6 +783,7 @@ export const api = (node: NodeApis) => describe('API', () => {
 							});
 						})();
 						`,
+						'file.mts': 'export const message = "foo bar"',
 						...tsFiles,
 					});
 
@@ -791,31 +795,12 @@ export const api = (node: NodeApis) => describe('API', () => {
 					expect(stdout).toMatch(new RegExp([
 						'Fails as expected 1',
 						String.raw`foo bar json file\.ts\?tsx-namespace=\d+`,
+						'foo bar',
 						String.raw`foo bar json file\.ts\?with-query&tsx-namespace=\d+`,
 						'cjsReexport esm syntax',
 						'cjsReexport esm syntax',
 						'Fails as expected 2',
 					].join(String.raw`\n`)));
-				});
-
-				test('mts from commonjs', async () => {
-					await using fixture = await createFixture({
-						'import.cjs': outdent`
-						const { tsImport } = require(${JSON.stringify(tsxEsmApiCjsPath)});
-
-						(async () => {
-							const { message } = await tsImport('./file.mts', __filename);
-							console.log(message);
-						})();
-						`,
-						'file.mts': 'export const message = "foo bar"',
-					});
-
-					const { stdout } = await execaNode(fixture.getPath('import.cjs'), [], {
-						nodePath: node.path,
-						nodeOptions: [],
-					});
-					expect(stdout).toBe('foo bar');
 				});
 
 				test('namespace allows async nested calls without cross contamination', async () => {
