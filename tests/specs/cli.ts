@@ -1,5 +1,5 @@
 import { setTimeout } from 'node:timers/promises';
-import { on } from 'node:events';
+import { on, once } from 'node:events';
 import {
 	describe, test, onFinish, onTestFail, expect,
 } from 'manten';
@@ -47,42 +47,62 @@ const isAbortError = (
 	error: unknown,
 ) => error instanceof Error && error.name === 'AbortError';
 
+const readStdoutNumber = async (
+	stdoutStream: NodeJS.ReadableStream,
+) => {
+	stdoutStream.setEncoding('utf8');
+	const [data] = await once(stdoutStream, 'data');
+	return Number(data);
+};
+
 const waitForSignalRelay = async (
 	stdoutStream: NodeJS.ReadableStream,
 	signalName: string,
 	sendSignal: () => void,
 ) => {
-	let stdout = '';
+	stdoutStream.setEncoding('utf8');
+	const stdoutChunks: string[] = [];
+	const readyMarker = 'READY';
+	const relayMarker = `${signalName} PRESS AGAIN`;
+	const maxMarkerLength = Math.max(readyMarker.length, relayMarker.length);
+	let markerBuffer = '';
 	let sentFirstSignal = false;
 	let sentSecondSignal = isWindows;
+	const getStdout = () => stdoutChunks.join('');
+	const appendStdout = (chunk: string) => {
+		stdoutChunks.push(chunk);
+		const markerSearchBuffer = `${markerBuffer}${chunk}`;
+		markerBuffer = markerSearchBuffer.slice(-maxMarkerLength);
+		return markerSearchBuffer;
+	};
 
 	try {
 		for await (const [data] of on(stdoutStream, 'data', {
 			close: ['end', 'close'],
 			signal: AbortSignal.timeout(10_000),
 		})) {
-			stdout += data.toString();
+			const markerSearchBuffer = appendStdout(data);
 
-			if (!sentFirstSignal && stdout.includes('READY')) {
+			if (!sentFirstSignal && markerSearchBuffer.includes(readyMarker)) {
 				sentFirstSignal = true;
 				sendSignal();
 
 				if (sentSecondSignal) {
-					return stdout;
+					return getStdout();
 				}
 			}
 
-			if (!sentSecondSignal && stdout.includes(`${signalName} PRESS AGAIN`)) {
+			if (!sentSecondSignal && markerSearchBuffer.includes(relayMarker)) {
 				sentSecondSignal = true;
 				sendSignal();
-				return stdout;
+				return getStdout();
 			}
 		}
 	} catch (error) {
 		if (isAbortError(error)) {
 			throw Object.assign(
 				new Error(`Timed out waiting for ${signalName} relay`),
-				{ stdout },
+				{ stdout: getStdout() },
 			);
 		}
 
@@ -91,7 +111,7 @@ const waitForSignalRelay = async (
 
 	throw Object.assign(
 		new Error(`Process exited before ${signalName} relay completed`),
-		{ stdout },
+		{ stdout: getStdout() },
 	);
 };
 
@@ -336,11 +356,7 @@ export const cli = (node: NodeApis) => describe('CLI', () => {
 				fixture.getPath('infinite-loop.js'),
 			]);
 
-			const childPid = await new Promise<number>((resolve) => {
-				tsxProcess.stdout!.once('data', (data) => {
-					resolve(Number(data.toString()));
-				});
-			});
+			const childPid = await readStdoutNumber(tsxProcess.stdout!);
 
 			tsxProcess.kill('SIGINT', {
 				forceKillAfterTimeout: false,
@@ -368,11 +384,7 @@ export const cli = (node: NodeApis) => describe('CLI', () => {
 				fixture.getPath('ignores-signals.js'),
 			]);
 
-			const childPid = await new Promise<number>((resolve) => {
-				tsxProcess.stdout!.once('data', (data) => {
-					resolve(Number(data.toString()));
-				});
-			});
+			const childPid = await readStdoutNumber(tsxProcess.stdout!);
 
 			// Send SIGINT to child
 			tsxProcess.kill('SIGINT', {

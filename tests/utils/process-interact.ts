@@ -58,6 +58,7 @@ export const processInteract = async (
 		stdout: string;
 	}[] = [];
 
+	stdout.setEncoding('utf8');
 	let currentAction = actions.shift();
 
 	onTimeout(() => {
@@ -72,7 +73,7 @@ export const processInteract = async (
 
 	while (currentAction) {
 		for await (const [chunk] of on(stdout, 'data')) {
-			const chunkString = stripAnsi(chunk.toString());
+			const chunkString = stripAnsi(chunk);
 			logs.push({
 				time: Date.now() - startTime,
 				stdout: chunkString,
