@@ -177,38 +177,7 @@ export const tsconfig = ({ tsx }: NodeApis) => describe('tsconfig', () => {
 					expect(pTsconfig.stdout).toBe('resolved via configDir');
 				});
 
-				test('tsconfig paths can match colon aliases', async () => {
-					await using fixture = await createFixture({
-						'package.json': createPackageJson(packageType ? { type: packageType } : {}),
-						'tsconfig.json': createTsconfig({
-							compilerOptions: {
-								baseUrl: '.',
-								paths: {
-									'ns:*': ['./src/*'],
-								},
-							},
-						}),
-						'index.mts': `
-						import { value } from 'ns:utils.mjs';
-
-						console.log(value);
-						`,
-						src: {
-							'utils.mts': "export const value = 'success';",
-						},
-					});
-
-					const pTsconfig = await tsx(['index.mts'], fixture.path);
-					onTestFail((error) => {
-						console.error(error);
-						console.log(pTsconfig);
-					});
-					expect(pTsconfig.failed).toBe(false);
-					expect(pTsconfig.stderr).toBe('');
-					expect(pTsconfig.stdout).toBe('success');
-				});
-
-				test('tsconfig paths do not resolve data URLs', async () => {
+				test('tsconfig paths handle colon aliases and data URLs', async () => {
 					await using fixture = await createFixture({
 						'package.json': createPackageJson(packageType ? { type: packageType } : {}),
 						'tsconfig.json': createTsconfig({
@@ -216,15 +185,21 @@ export const tsconfig = ({ tsx }: NodeApis) => describe('tsconfig', () => {
 								baseUrl: '.',
 								paths: {
 									'data:*': ['./src/wrong.mjs'],
+									'ns:*': ['./src/*'],
 								},
 							},
 						}),
 						'index.mts': `
-						import { value } from 'data:text/javascript,export%20const%20value%20%3D%20%22data-url%22%3B';
+						import { value as colonAlias } from 'ns:utils.mjs';
+						import { value as dataUrl } from 'data:text/javascript,export%20const%20value%20%3D%20%22data-url%22%3B';
 
-						console.log(value);
+						console.log(JSON.stringify({
+							colonAlias,
+							dataUrl,
+						}));
 						`,
 						src: {
+							'utils.mts': "export const value = 'success';",
 							'wrong.mts': "export const value = 'wrong';",
 						},
 					});
@@ -236,7 +211,10 @@ export const tsconfig = ({ tsx }: NodeApis) => describe('tsconfig', () => {
 					});
 					expect(pTsconfig.failed).toBe(false);
 					expect(pTsconfig.stderr).toBe('');
-					expect(pTsconfig.stdout).toBe('data-url');
+					expect(JSON.parse(pTsconfig.stdout)).toEqual({
+						colonAlias: 'success',
+						dataUrl: 'data-url',
+					});
 				});
 			});
 
