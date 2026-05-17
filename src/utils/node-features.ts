@@ -84,6 +84,11 @@ export const testRunnerGlob: Version[] = [
 	[21, 0, 0],
 ];
 
+// https://github.com/nodejs/node/blob/v18.1.0/doc/api/cli.md#L1060-L1068
+export const cliTestFlag: Version[] = [
+	[18, 1, 0],
+];
+
 // https://github.com/nodejs/node/pull/50825
 export const esmLoadReadFile: Version[] = [
 	[20, 11, 0],

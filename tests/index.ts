@@ -11,6 +11,7 @@ import { processInteractSpec } from './specs/process-interact';
 import { tsconfig } from './specs/tsconfig';
 import { transformSpec } from './specs/transform';
 import { commonJsModeContracts } from './specs/commonjs-mode-contracts';
+import { nodeCapabilitiesSpec } from './specs/node-capabilities';
 import { versionSensitiveTests } from './specs/version-sensitive';
 
 (async () => {
@@ -21,6 +22,7 @@ import { versionSensitiveTests } from './specs/version-sensitive';
 		await repl();
 		await processInteractSpec();
 		await transformSpec();
+		await nodeCapabilitiesSpec();
 
 		const [primaryNodeVersion, ...compatNodeVersions] = nodeVersions;
 		const primaryNode = await createNode(primaryNodeVersion);

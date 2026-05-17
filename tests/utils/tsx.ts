@@ -1,24 +1,8 @@
 import { fileURLToPath } from 'node:url';
 import { execaNode, type NodeOptions } from 'execa';
 import { onTestFail, onTestFinish } from 'manten';
-import {
-	cjsNamespaceFromLoadHook,
-	esmLoadReadFile,
-	isFeatureSupported,
-	isFeatureSupportedInRange,
-	modulePackageMainResolution,
-	moduleRegister,
-	moduleRegisterHooksCjsReload,
-	importMetaPathProperties,
-	testRunnerGlob,
-	requireEsmExtensionlessMjs,
-	requireEsm,
-	requireEsmNoWarning,
-	cjsNamespaceModuleExports,
-	nativeTypeScript,
-	wasmModules,
-	type Version,
-} from '../../src/utils/node-features.js';
+import { createNodeCapabilities } from '../../src/platform/node-capabilities.js';
+import type { Version } from '../../src/utils/node-features.js';
 import { getNode } from './get-node.js';
 
 type Options = {
@@ -87,38 +71,35 @@ export const createNode = async (
 ) => {
 	const node = await getNode(nodeVersion);
 	const versionParsed = node.version.split('.').map(Number) as Version;
+	const capabilities = createNodeCapabilities(versionParsed);
 	const supports = {
-		moduleRegister: isFeatureSupported(moduleRegister, versionParsed),
+		moduleRegister: capabilities.moduleApis.register,
 
-		moduleRegisterHooksCjsReload: isFeatureSupported(moduleRegisterHooksCjsReload, versionParsed),
+		moduleRegisterHooksCjsReload: capabilities.moduleApis.registerHooksCanReloadCjs,
 
-		esmLoadReadFile: isFeatureSupported(esmLoadReadFile, versionParsed),
+		esmLoadReadFile: capabilities.esm.loadHookCanReadFile,
 
-		importMetaPathProperties: isFeatureSupported(importMetaPathProperties, versionParsed),
+		importMetaPathProperties: capabilities.esm.importMetaPathProperties,
 
-		testRunnerGlob: isFeatureSupported(testRunnerGlob, versionParsed),
+		testRunnerGlob: capabilities.cli.testRunnerGlob,
 
-		// https://nodejs.org/docs/latest-v18.x/api/cli.html#--test
-		cliTestFlag: isFeatureSupported([[18, 1, 0]], versionParsed),
+		cliTestFlag: capabilities.cli.testFlag,
 
-		cjsInterop: isFeatureSupportedInRange(cjsNamespaceFromLoadHook, versionParsed),
+		cjsInterop: capabilities.esm.cjsNamespaceFromLoadHook,
 
-		cjsNamespaceModuleExports: isFeatureSupported(cjsNamespaceModuleExports, versionParsed),
+		cjsNamespaceModuleExports: capabilities.esm.cjsNamespaceIncludesModuleExports,
 
-		nativeTypeScript: isFeatureSupported(nativeTypeScript, versionParsed),
+		nativeTypeScript: capabilities.typeScript.nativeTypeScript,
 
-		wasmModules: isFeatureSupported(wasmModules, versionParsed),
+		wasmModules: capabilities.webAssembly.modules,
 
-		requireEsm: isFeatureSupported(requireEsm, versionParsed),
+		requireEsm: capabilities.commonJs.requireEsm,
 
-		requireEsmNoWarning: isFeatureSupported(requireEsmNoWarning, versionParsed),
+		requireEsmNoWarning: capabilities.commonJs.requireEsmNoWarning,
 
-		requireEsmExtensionlessMjs: isFeatureSupportedInRange(
-			requireEsmExtensionlessMjs,
-			versionParsed,
-		),
+		requireEsmExtensionlessMjs: capabilities.commonJs.requireEsmExtensionlessMjs,
 
-		modulePackageMainResolution: isFeatureSupported(modulePackageMainResolution, versionParsed),
+		modulePackageMainResolution: capabilities.moduleResolution.packageMainResolution,
 	};
 	const hookFlag = supports.moduleRegister ? '--import' : '--loader';
 
