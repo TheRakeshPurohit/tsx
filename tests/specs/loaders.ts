@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import {
 	describe, test, onFinish, expect,
 } from 'manten';
@@ -13,33 +14,48 @@ export const loaders = (node: NodeApis) => describe('Loaders', () => {
 			'ts.ts': `
 			import fs from 'node:fs';
 
-			console.log(Boolean(fs) as unknown as string);
+			export const tsLoaded = Boolean(fs);
 			`,
 			'mts.mts': `
 			import fs from 'node:fs';
 
-			console.log(JSON.stringify([Boolean(fs) as unknown as string, import.meta.url]));
+			export const mtsLoaded = Boolean(fs);
+			export const mtsImportMetaUrl = import.meta.url;
+			`,
+			'runner.mts': `
+			import { tsLoaded } from './ts.ts';
+			import { mtsLoaded, mtsImportMetaUrl } from './mts.mts';
+
+			console.log(JSON.stringify({
+				mts: {
+					importMetaUrl: mtsImportMetaUrl,
+					loaded: mtsLoaded,
+				},
+				ts: {
+					loaded: tsLoaded,
+				},
+			}));
 			`,
 		});
 		onFinish(async () => await fixture.rm());
 
-		test('.ts', async () => {
-			const tsxResult = await node.hook(['./ts.ts'], fixture.path);
-
-			expect(tsxResult.stdout).toBe('true');
-			expect(tsxResult.stderr).toBe('');
-			expect(tsxResult.exitCode).toBe(0);
-		});
-
-		test('.mts', async () => {
-			const tsxResult = await node.hook(['./mts.mts'], fixture.path);
-
-			const [imported, importMetaUrl] = JSON.parse(tsxResult.stdout);
-			expect(imported).toBe(true);
-			expect(importMetaUrl.endsWith('/mts.mts')).toBeTruthy();
+		test('.ts and .mts', async () => {
+			const tsxResult = await node.hook(['./runner.mts'], fixture.path);
 
 			expect(tsxResult.stderr).toBe('');
 			expect(tsxResult.exitCode).toBe(0);
+
+			const loaderHooksResult = JSON.parse(tsxResult.stdout);
+
+			expect(loaderHooksResult).toEqual({
+				mts: {
+					importMetaUrl: pathToFileURL(fixture.getPath('mts.mts')).toString(),
+					loaded: true,
+				},
+				ts: {
+					loaded: true,
+				},
+			});
 		});
 	});
 
