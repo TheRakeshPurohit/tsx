@@ -63,6 +63,7 @@ export const loaders = (node: NodeApis) => describe('Loaders', () => {
 			console.log(Boolean(fs) as unknown as string, import.meta.url);
 			`,
 		});
+		onFinish(async () => await fixture.rm());
 
 		test('.ts', async () => {
 			const tsxResult = await node.cjsPatched(['./ts.ts'], fixture.path);

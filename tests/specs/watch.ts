@@ -44,15 +44,15 @@ export const watch = ({ tsx }: NodeApis) => describe('watch', async () => {
 		await processInteract(
 			tsxProcess.stdout!,
 			[
-				async (data) => {
-					if (data.includes('hello world\n')) {
+				async ({ output }) => {
+					if (output.includes('hello world\n')) {
 						await setTimeout(1000);
-						fixtureWatch.writeFile('value.js', 'export const value = \'goodbye world\';');
+						await fixtureWatch.writeFile('value.js', 'export const value = \'goodbye world\';');
 						return true;
 					}
 				},
-				data => data.includes('[tsx] change in ./value.js Rerunning...\n'),
-				data => data.includes('goodbye world\n'),
+				({ output }) => output.includes('[tsx] change in ./value.js Rerunning...\n'),
+				({ output }) => output.includes('goodbye world\n'),
 			],
 			9000,
 		);
@@ -74,13 +74,13 @@ export const watch = ({ tsx }: NodeApis) => describe('watch', async () => {
 		await processInteract(
 			tsxProcess.stdout!,
 			[
-				(data) => {
-					if (data.includes('log-argv.ts')) {
+				({ chunk }) => {
+					if (chunk.includes('log-argv.ts')) {
 						tsxProcess.stdin?.write('enter');
 						return true;
 					}
 				},
-				data => data.includes('log-argv.ts'),
+				({ chunk }) => chunk.includes('log-argv.ts'),
 			],
 			5000,
 		);
@@ -104,7 +104,7 @@ export const watch = ({ tsx }: NodeApis) => describe('watch', async () => {
 		);
 		await processInteract(
 			tsxProcess.stdout!,
-			[data => data.startsWith('["')],
+			[({ output }) => output.startsWith('["')],
 			5000,
 		);
 
@@ -149,13 +149,13 @@ export const watch = ({ tsx }: NodeApis) => describe('watch', async () => {
 		await processInteract(
 			tsxProcess.stdout!,
 			[
-				(data) => {
-					if (data.includes('start\n')) {
+				({ output }) => {
+					if (output.includes('start\n')) {
 						tsxProcess.stdin?.write('enter');
 						return true;
 					}
 				},
-				data => data.includes('end\n'),
+				({ output }) => output.includes('end\n'),
 			],
 			5000,
 		);
@@ -186,7 +186,7 @@ export const watch = ({ tsx }: NodeApis) => describe('watch', async () => {
 			);
 			await processInteract(
 				tsxProcess.stdout!,
-				[data => data.startsWith('["')],
+				[({ output }) => output.startsWith('["')],
 				5000,
 			);
 
@@ -231,20 +231,20 @@ export const watch = ({ tsx }: NodeApis) => describe('watch', async () => {
 			await processInteract(
 				tsxProcess.stdout!,
 				[
-					(data) => {
-						if (data.includes("'content-a', 'content-b'")) {
-							fixture.writeFile(fileA, 'update-a');
+					async ({ output }) => {
+						if (output.includes("'content-a', 'content-b'")) {
+							await fixture.writeFile(fileA, 'update-a');
 							return true;
 						}
 					},
-					(data) => {
-						if (data.includes("'update-a', 'content-b'")) {
-							fixture.writeFile(fileB, 'update-b');
+					async ({ output }) => {
+						if (output.includes("'update-a', 'content-b'")) {
+							await fixture.writeFile(fileB, 'update-b');
 							return true;
 						}
 					},
-					(data) => {
-						if (data.includes("'update-a', 'update-b'")) {
+					({ output }) => {
+						if (output.includes("'update-a', 'update-b'")) {
 							return true;
 						}
 					},
@@ -294,8 +294,8 @@ export const watch = ({ tsx }: NodeApis) => describe('watch', async () => {
 				processInteract(
 					tsxProcess.stdout!,
 					[
-						async (data) => {
-							if (data !== 'logA logB logC\n') {
+						async ({ output }) => {
+							if (!output.includes('logA logB logC\n')) {
 								return;
 							}
 
@@ -307,8 +307,8 @@ export const watch = ({ tsx }: NodeApis) => describe('watch', async () => {
 							]);
 							return true;
 						},
-						(data) => {
-							if (data.includes(negativeSignal)) {
+						({ output }) => {
+							if (output.includes(negativeSignal)) {
 								throw new Error('Unexpected re-run');
 							}
 						},
@@ -343,7 +343,7 @@ export const watch = ({ tsx }: NodeApis) => describe('watch', async () => {
 		);
 		await processInteract(
 			tsxProcess.stdout!,
-			[data => data.startsWith('["')],
+			[({ output }) => output.startsWith('["')],
 			5000,
 		);
 
@@ -380,21 +380,21 @@ export const watch = ({ tsx }: NodeApis) => describe('watch', async () => {
 		await processInteract(
 			tsxProcess.all!,
 			[
-				async (data) => {
-					output += data;
-					if (data.includes('Error: fails')) {
+				async ({ output: stdout }) => {
+					output = stdout;
+					if (stdout.includes('Error: fails')) {
 						await setTimeout(100);
-						fixtureRecovery.writeFile('index.ts', 'console.log("recovered")');
+						await fixtureRecovery.writeFile('index.ts', 'console.log("recovered")');
 						return true;
 					}
 				},
-				(data) => {
-					output += data;
-					return data.includes('[tsx] change in ./index.ts Rerunning...\n');
+				({ output: stdout }) => {
+					output = stdout;
+					return stdout.includes('[tsx] change in ./index.ts Rerunning...\n');
 				},
-				(data) => {
-					output += data;
-					return data.includes('recovered\n');
+				({ output: stdout }) => {
+					output = stdout;
+					return stdout.includes('recovered\n');
 				},
 			],
 			10_000,

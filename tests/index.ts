@@ -7,6 +7,7 @@ import { cli } from './specs/cli';
 import { watch } from './specs/watch';
 import { loaders } from './specs/loaders';
 import { repl } from './specs/repl';
+import { processInteractSpec } from './specs/process-interact';
 import { tsconfig } from './specs/tsconfig';
 import { transformSpec } from './specs/transform';
 import { commonJsModeContracts } from './specs/commonjs-mode-contracts';
@@ -18,6 +19,7 @@ import { versionSensitiveTests } from './specs/version-sensitive';
 
 	await describe('tsx', async () => {
 		await repl();
+		await processInteractSpec();
 		await transformSpec();
 
 		const [primaryNodeVersion, ...compatNodeVersions] = nodeVersions;

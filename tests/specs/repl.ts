@@ -19,19 +19,19 @@ export const repl = () => describe('REPL', () => {
 		await processInteract(
 			tsxProcess.stdout!,
 			[
-				(data) => {
-					if (data.includes('> ')) {
+				({ chunk }) => {
+					if (chunk.includes('> ')) {
 						tsxProcess.stdin!.write('const message: string = "SUCCESS"\r');
 						return true;
 					}
 				},
-				(data) => {
-					if (data.includes('> ')) {
+				({ chunk }) => {
+					if (chunk.includes('> ')) {
 						tsxProcess.stdin!.write('message\r');
 						return true;
 					}
 				},
-				data => data.includes('SUCCESS'),
+				({ output }) => output.includes('SUCCESS'),
 			],
 			5000,
 		);
@@ -47,13 +47,13 @@ export const repl = () => describe('REPL', () => {
 		await processInteract(
 			tsxProcess.stdout!,
 			[
-				(data) => {
-					if (data.includes('> ')) {
+				({ chunk }) => {
+					if (chunk.includes('> ')) {
 						tsxProcess.stdin!.write('require("path")\r');
 						return true;
 					}
 				},
-				data => data.includes('[Function: resolve]'),
+				({ output }) => output.includes('[Function: resolve]'),
 			],
 			5000,
 		);
@@ -69,25 +69,25 @@ export const repl = () => describe('REPL', () => {
 		await processInteract(
 			tsxProcess.stdout!,
 			[
-				(data) => {
-					if (data.includes('> ')) {
+				({ chunk }) => {
+					if (chunk.includes('> ')) {
 						tsxProcess.stdin!.write('(\r');
 						return true;
 					}
 				},
-				(data) => {
-					if (isContinuationPrompt(data)) {
+				({ chunk }) => {
+					if (isContinuationPrompt(chunk)) {
 						tsxProcess.stdin!.write('1\r');
 						return true;
 					}
 				},
-				(data) => {
-					if (isContinuationPrompt(data)) {
+				({ chunk }) => {
+					if (isContinuationPrompt(chunk)) {
 						tsxProcess.stdin!.write(')\r');
 						return true;
 					}
 				},
-				data => data.includes('1'),
+				({ chunk }) => chunk.includes('1'),
 			],
 			5000,
 		);
@@ -103,13 +103,13 @@ export const repl = () => describe('REPL', () => {
 		await processInteract(
 			tsxProcess.stdout!,
 			[
-				(data) => {
-					if (data.includes('> ')) {
+				({ chunk }) => {
+					if (chunk.includes('> ')) {
 						tsxProcess.stdin!.write('import fs from "fs"\r');
 						return true;
 					}
 				},
-				data => data.includes('SyntaxError: Cannot use import statement'),
+				({ output }) => output.includes('SyntaxError: Cannot use import statement'),
 			],
 			5000,
 		);

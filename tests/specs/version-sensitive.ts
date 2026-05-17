@@ -152,20 +152,20 @@ export const versionSensitiveTests = (node: NodeApis) => describe('Version-sensi
 			await processInteract(
 				tsxProcess.stdout!,
 				[
-					async (data) => {
-						output += data;
+					async ({ output: stdout }) => {
+						output = stdout;
 						if (output.includes('first')) {
 							await setTimeout(1000);
 							await fixture.writeFile('value.ts', 'export const value = "second";');
 							return true;
 						}
 					},
-					(data) => {
-						output += data;
+					({ output: stdout }) => {
+						output = stdout;
 						return output.includes('[tsx] change in ./value.ts Rerunning...');
 					},
-					(data) => {
-						output += data;
+					({ output: stdout }) => {
+						output = stdout;
 						return output.includes('second');
 					},
 				],
