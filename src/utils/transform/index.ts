@@ -53,11 +53,15 @@ const getImportMeta = (
 	url,
 });
 
+type TransformSyncOptions = TransformOptions & {
+	cjsBanner?: string;
+};
+
 // Used by cjs-loader
 export const transformSync = (
 	code: string,
 	filePathOrUrl: string,
-	extendOptions?: TransformOptions,
+	extendOptions?: TransformSyncOptions,
 ): Transformed => {
 	let url: string;
 	let filePath: string;
@@ -72,17 +76,21 @@ export const transformSync = (
 		url = pathToFileURL(filePath) + (query ? `?${query}` : '');
 	}
 
+	const {
+		cjsBanner,
+		...extendOptionsWithoutCjsBanner
+	} = extendOptions ?? {};
 	const esbuildOptions: TransformOptions = {
 		...cacheConfig,
 		format: 'cjs',
 		sourcefile: filePath,
-		banner: `__filename=${JSON.stringify(filePath)};(()=>{`,
+		banner: `__filename=${JSON.stringify(filePath)};(()=>{${cjsBanner ?? ''}`,
 		footer: '})()',
 
 		// CJS Annotations for Node. Used by ESM loader for CJS interop
 		platform: 'node',
 
-		...extendOptions,
+		...extendOptionsWithoutCjsBanner,
 	};
 
 	if (

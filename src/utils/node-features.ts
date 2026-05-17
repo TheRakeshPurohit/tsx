@@ -136,6 +136,8 @@ export const wasmModules: Version[] = [
 
 // https://github.com/nodejs/node/pull/50825
 // https://github.com/nodejs/node/pull/54769
+// https://github.com/nodejs/node/blob/v18.20.8/lib/internal/modules/esm/translators.js#L183-L190
+// https://github.com/nodejs/node/blob/v22.22.2/lib/internal/modules/esm/translators.js#L182-L190
 export const cjsNamespaceFromLoadHook: VersionRange[] = [
 	{
 		from: [20, 11, 0],
@@ -143,11 +145,6 @@ export const cjsNamespaceFromLoadHook: VersionRange[] = [
 	},
 	{
 		from: [21, 3, 0],
-		before: [22, 0, 0],
-	},
-	{
-		from: [22, 0, 0],
-		before: [22, 10, 0],
 	},
 ];
 

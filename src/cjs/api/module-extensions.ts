@@ -209,6 +209,11 @@ export const createExtensions = (
 		});
 
 		module._compile(code, cleanFilePath);
+		if (query && Module._cache[cleanFilePath] === module) {
+			Module._cache[filePath] = module;
+			delete Module._cache[cleanFilePath];
+		}
+
 		const { exports } = module;
 		const moduleExportsDescriptor = (
 			shouldApplyRequireEsmInterop

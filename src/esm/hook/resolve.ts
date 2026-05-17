@@ -13,24 +13,31 @@ import type { NodeError } from '../../types.js';
 import {
 	fileUrlPrefix,
 	tsExtensionsPattern,
+	implicitTsExtensionsPattern,
 	isDirectoryPattern,
 	isRelativePath,
 	isFilePath,
 } from '../../utils/path-utils.js';
 import type { TsxRequest } from '../types.js';
 import { isGlobalCjsLoaderActive } from '../../utils/cjs-loader-state.js';
+import { esmLoadReadFile, isFeatureSupported } from '../../utils/node-features.js';
 import { logEsm as log, debugEnabled } from '../../utils/debug.js';
 import {
 	getFormatFromFileUrl,
 	getFormatFromFileUrlSync,
 	namespaceQuery,
+	commonJsExportPreparseQuery,
+	commonJsVirtualQuerySearchParameter,
+	getQueryWithoutParameters,
 	getNamespace,
+	parentImportsCommonJsExports,
 } from './utils.js';
 import { data as defaultData, type Data } from './initialize.js';
 
 type NextResolve = Parameters<ResolveHook>[2];
 type NextResolveSync = Parameters<ResolveHookSync>[2];
 
+const supportsEsmLoadReadFile = isFeatureSupported(esmLoadReadFile);
 const urlLikeSpecifierPattern = /^(?:[a-z][\d+.a-z-]*:\/\/|data:|file:|node:)/i;
 
 const isTsconfigPathAliasSpecifier = (
@@ -519,6 +526,43 @@ const isCommonJsRequireContext = (
 	&& !context.conditions.includes('import')
 );
 
+const addQuery = (
+	url: string,
+	query: string,
+) => `${url}${url.includes('?') ? '&' : '?'}${query}`;
+
+const preserveCommonJsQueryIdentity = (
+	url: string,
+	format: string | null | undefined,
+	requestNamespace: string | undefined,
+) => {
+	if (
+		format !== 'commonjs'
+		|| !url.startsWith(fileUrlPrefix)
+		|| !implicitTsExtensionsPattern.test(url)
+	) {
+		return url;
+	}
+
+	const fileUrl = new URL(url);
+	const virtualQuery = [
+		getQueryWithoutParameters(fileUrl.search, [namespaceQuery]),
+		...(
+			requestNamespace
+				? [`namespace=${encodeURIComponent(requestNamespace)}`]
+				: []
+		),
+	].filter(Boolean).join('&');
+
+	if (!virtualQuery) {
+		return url;
+	}
+
+	fileUrl.pathname += `%3F${virtualQuery}`;
+	fileUrl.searchParams.set(commonJsVirtualQuerySearchParameter, '1');
+	return fileUrl.toString();
+};
+
 export const createResolve = (
 	hookData: Data,
 ): ResolveHook => {
@@ -601,12 +645,40 @@ export const createResolve = (
 			resolved.url += `?${query}`;
 		}
 
+		// Node 18's CJS ESM translator ignores loader-provided source and
+		// preparses the original file, so only named imports/re-exports use the
+		// ESM fallback. Source-capable async loaders use the same hint for static
+		// namespace imports so Node preparses the transformed CJS export annotation.
+		// https://github.com/nodejs/node/blob/v18.20.8/lib/internal/modules/esm/translators.js#L183-L190
+		// https://github.com/nodejs/node/blob/v22.22.2/lib/internal/modules/esm/translators.js#L182-L190
+		const shouldLoadForCommonJsExportPreparse = (
+			context.parentURL
+			&& resolved.format === 'commonjs'
+			&& implicitTsExtensionsPattern.test(resolved.url)
+			&& (
+				context.parentURL.includes(commonJsExportPreparseQuery)
+				|| parentImportsCommonJsExports(context.parentURL, specifier, supportsEsmLoadReadFile)
+			)
+		);
+
 		// Inherit namespace
 		if (
 			requestNamespace
 			&& !resolved.url.includes(namespaceQuery)
 		) {
-			resolved.url += (resolved.url.includes('?') ? '&' : '?') + namespaceQuery + requestNamespace;
+			resolved.url = addQuery(resolved.url, `${namespaceQuery}${requestNamespace}`);
+		}
+
+		if (shouldLoadForCommonJsExportPreparse) {
+			resolved.url = addQuery(resolved.url, commonJsExportPreparseQuery);
+		}
+
+		if (requestNamespace || shouldLoadForCommonJsExportPreparse) {
+			resolved.url = preserveCommonJsQueryIdentity(
+				resolved.url,
+				resolved.format,
+				requestNamespace,
+			);
 		}
 
 		return resolved;
@@ -723,8 +795,14 @@ export const createResolveSync = (
 			requestNamespace
 			&& !resolved.url.includes(namespaceQuery)
 		) {
-			resolved.url += (resolved.url.includes('?') ? '&' : '?') + namespaceQuery + requestNamespace;
+			resolved.url = addQuery(resolved.url, `${namespaceQuery}${requestNamespace}`);
 		}
+
+		resolved.url = preserveCommonJsQueryIdentity(
+			resolved.url,
+			resolved.format,
+			requestNamespace,
+		);
 
 		return resolved;
 	};

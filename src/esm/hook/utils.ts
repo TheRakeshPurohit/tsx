@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { parseEsm } from '../../utils/es-module-lexer.js';
 import { tsExtensions } from '../../utils/path-utils.js';
 import { getPackageType, getPackageTypeSync } from './package-json.js';
 
@@ -33,6 +34,103 @@ export const getFormatFromFileUrlSync = (fileUrl: string) => {
 };
 
 export const namespaceQuery = 'tsx-namespace=';
+export const commonJsExportPreparseSearchParameter = 'tsx-commonjs-export-preparse';
+export const commonJsExportPreparseQuery = `${commonJsExportPreparseSearchParameter}=1`;
+export const commonJsVirtualQuerySearchParameter = 'tsx-commonjs-virtual-query';
+export const moduleSourceByUrl = new Map<string, string>();
+
+type CommonJsImportBinding = 'named' | 'namespace' | undefined;
+
+export const getQueryWithoutParameters = (
+	search: string,
+	parameters: string[],
+) => (
+	search
+		.slice(1)
+		.split('&')
+		.filter(parameter => (
+			parameter
+			&& parameters.every(parameterPrefix => !parameter.startsWith(parameterPrefix))
+		))
+		.join('&')
+);
+
+export const getSearchWithoutParameters = (
+	search: string,
+	parameters: string[],
+) => {
+	const query = getQueryWithoutParameters(search, parameters);
+	return query ? `?${query}` : '';
+};
+
+const stripComments = (
+	source: string,
+) => source.replaceAll(/\/\*[\s\S]*?\*\/|\/\/[^\n\r]*/g, '');
+
+const getCommonJsImportBinding = (
+	statementBeforeSpecifier: string,
+): CommonJsImportBinding => {
+	const statement = stripComments(statementBeforeSpecifier);
+
+	if (/^\s*export\s*\*/.test(statement)) {
+		return 'named';
+	}
+
+	if (/^\s*import\s*\*\s*as\s+[\w$]+/.test(statement)) {
+		return 'namespace';
+	}
+
+	const namedBindings = statement.match(/\{([^}]*)\}/)?.[1];
+	if (!namedBindings) {
+		return;
+	}
+
+	return (
+		namedBindings
+			.split(',')
+			.some((binding) => {
+				const importedName = binding.trim().split(/\s+as\s+/)[0];
+				return Boolean(importedName && importedName !== 'default');
+			})
+			? 'named'
+			: undefined
+	);
+};
+
+export const parentImportsCommonJsExports = (
+	parentUrl: string,
+	specifier: string,
+	includeNamespaceImports: boolean,
+) => {
+	const source = moduleSourceByUrl.get(parentUrl);
+	if (!source) {
+		return false;
+	}
+
+	try {
+		const [imports] = parseEsm(source);
+		return imports.some((importSpecifier) => {
+			if (
+				importSpecifier.d !== -1
+				|| importSpecifier.n !== specifier
+			) {
+				return false;
+			}
+
+			const binding = getCommonJsImportBinding(source.slice(importSpecifier.ss, importSpecifier.s));
+			return (
+				binding === 'named'
+				|| (
+					includeNamespaceImports
+					&& binding === 'namespace'
+				)
+			);
+		});
+	} catch {
+		return false;
+	}
+};
+
 export const getNamespace = (
 	url: string,
 ) => {

@@ -2,7 +2,7 @@ import path from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import {
-	describe, test, expect,
+	describe, test, expect, skip,
 } from 'manten';
 import { execaNode } from 'execa';
 import { createFixture } from 'fs-fixture';
@@ -154,19 +154,19 @@ export const versionSensitiveTests = (node: NodeApis) => describe('Version-sensi
 				[
 					async (data) => {
 						output += data;
-						if (data.includes('first\n')) {
+						if (output.includes('first')) {
 							await setTimeout(1000);
-							fixture.writeFile('value.ts', 'export const value = "second";');
+							await fixture.writeFile('value.ts', 'export const value = "second";');
 							return true;
 						}
 					},
 					(data) => {
 						output += data;
-						return data.includes('[tsx] change in ./value.ts Rerunning...\n');
+						return output.includes('[tsx] change in ./value.ts Rerunning...');
 					},
 					(data) => {
 						output += data;
-						return data.includes('second\n');
+						return output.includes('second');
 					},
 				],
 				10_000,
@@ -175,9 +175,9 @@ export const versionSensitiveTests = (node: NodeApis) => describe('Version-sensi
 			tsxProcess.kill();
 			await tsxProcess;
 
-			expect(output).toContain('first\n');
-			expect(output).toContain('[tsx] change in ./value.ts Rerunning...\n');
-			expect(output).toContain('second\n');
+			expect(output).toContain('first');
+			expect(output).toContain('[tsx] change in ./value.ts Rerunning...');
+			expect(output).toContain('second');
 		}, 12_000);
 
 		test('CLI runs without warnings', async () => {
@@ -238,6 +238,344 @@ export const versionSensitiveTests = (node: NodeApis) => describe('Version-sensi
 		});
 	}
 
+	test('ESM imports preserve CommonJS-classified TypeScript contracts', async () => {
+		await using fixture = await createFixture({
+			'package.json': createPackageJson({ type: 'commonjs' }),
+			'runner.mts': `
+				console.log(JSON.stringify({
+					static: (await import('./named/static.mts')).default,
+					staticCts: ${node.supports.cjsInterop ? "(await import('./cts/static-cts.mts')).default" : 'null'},
+					staticNamespace: (await import('./namespace/static-namespace.mts')).default,
+					staticNamespaceRequire: (await import('./namespace-require/static-namespace-require.mts')).default,
+					dynamicBeforeStatic: (await import('./order/dynamic-before-static.mts')).default,
+					staticRequire: (await import('./require/static-require.mts')).default,
+					dynamic: (await import('./dynamic/dynamic.mts')).default,
+					dynamicRequire: (await import('./dynamic-require/dynamic-require.mts')).default,
+					defaultImportKeepsCjsGlobals: (await import('./default-cjs-global/import.mts')).default,
+					commentedNamedBindings: (await import('./commented/import.mjs')).default,
+					queryIdentity: (await import('./query/import.mts')).default,
+				}));
+				`,
+			'named/config.ts': `
+				import { suffix } from './suffix.ts';
+
+				export const metaUrl = import.meta.url;
+				export function defineConfig(value: string) {
+					return \`\${value}:\${suffix}\`;
+				}
+				export default { defineConfig };
+				`,
+			'named/suffix.ts': 'export const suffix = "suffix";',
+			'named/static.mts': `
+				import { defineConfig, metaUrl } from './config';
+
+				export default {
+					metaUrl,
+					namedResult: defineConfig('static'),
+					namedType: typeof defineConfig,
+				};
+				`,
+			'cts/config.cts': `
+				export const value = "cts-named";
+				export default { value };
+				`,
+			'cts/static-cts.mts': `
+				import { value } from './config.cts';
+
+				export default value;
+				`,
+			'namespace/config.ts': `
+				import { suffix } from './suffix.ts';
+
+				export const metaUrl = import.meta.url;
+				export function defineConfig(value: string) {
+					return \`\${value}:\${suffix}\`;
+				}
+				export default { defineConfig };
+				`,
+			'namespace/suffix.ts': 'export const suffix = "suffix";',
+			'namespace/static-namespace.mts': `
+				import * as config from './config.ts';
+
+				export default {
+					defaultResult: config.default.defineConfig('static-namespace-default'),
+					hasNamed: Object.hasOwn(config, 'defineConfig'),
+					metaUrl: config.metaUrl,
+					namedResult: config.defineConfig?.('static-namespace-named') ?? null,
+					namedType: typeof config.defineConfig,
+				};
+				`,
+			'namespace-require/path.ts': `
+				export const sep = require("node:path").sep;
+				export default { sep };
+				`,
+			'namespace-require/static-namespace-require.mts': `
+				import * as path from './path.ts';
+
+				export default path.default.sep;
+				`,
+			'order/config.ts': `
+				import { suffix } from './suffix.ts';
+
+				export const metaUrl = import.meta.url;
+				export function defineConfig(value: string) {
+					return \`\${value}:\${suffix}\`;
+				}
+				export default { defineConfig };
+				`,
+			'order/suffix.ts': 'export const suffix = "suffix";',
+			'order/static-after-dynamic.mts': `
+				import { defineConfig } from './config.ts';
+
+				export default defineConfig('static-after-dynamic');
+				`,
+			'order/dynamic-before-static.mts': `
+				const namespace = await import('./config.ts');
+				const staticAfterDynamic = await import('./static-after-dynamic.mts');
+
+				export default [
+					namespace.defineConfig?.('dynamic-before-static') ?? null,
+					staticAfterDynamic.default,
+				];
+				`,
+			'require/config-require.ts': `
+				export const sep = require("node:path").sep;
+				export default { sep };
+				`,
+			'require/static-require.mts': `
+				import configDefault from './config-require.ts';
+				import * as configNamespace from './config-require.ts';
+
+				export default [
+					configDefault.sep,
+					configNamespace.default.sep,
+				];
+				`,
+			'dynamic/config.ts': `
+				import { suffix } from './suffix.ts';
+
+				export const metaUrl = import.meta.url;
+				export function defineConfig(value: string) {
+					return \`\${value}:\${suffix}\`;
+				}
+				export default { defineConfig };
+				`,
+			'dynamic/suffix.ts': 'export const suffix = "suffix";',
+			'dynamic/dynamic.mts': `
+				const namespace = await import('./config.ts');
+
+				export default {
+					defaultResult: namespace.default.defineConfig('dynamic-default'),
+					hasNamed: Object.hasOwn(namespace, 'defineConfig'),
+					metaUrl: namespace.metaUrl,
+					namedResult: namespace.defineConfig?.('dynamic-named') ?? null,
+					namedType: typeof namespace.defineConfig,
+				};
+				`,
+			'dynamic-require/config-require.ts': `
+				export const sep = require("node:path").sep;
+				export default { sep };
+				`,
+			'dynamic-require/dynamic-require.mts': `
+				const namespace = await import('./config-require.ts');
+
+				export default namespace.default.sep;
+				`,
+			'default-cjs-global/config.ts': `
+				if (!require.cache) {
+					throw new Error("require.cache should be defined");
+				}
+
+				module.exports = {
+					cacheDefined: true,
+				};
+				`,
+			'default-cjs-global/import.mts': `
+				import config from './config.ts?x=1';
+
+				export default config;
+				`,
+			'commented/config.ts': `
+				export const sep = require("node:path").sep;
+				export default { sep };
+				`,
+			'commented/import.mjs': `
+				import /* { sep } */ config from './config.ts';
+
+				export default config.sep;
+				`,
+			'query/config.ts': `
+				globalThis.__tsxQueryLoadCount = (globalThis.__tsxQueryLoadCount ?? 0) + 1;
+
+				export const count = globalThis.__tsxQueryLoadCount;
+				export const url = import.meta.url;
+				export default { count, url };
+				`,
+			'query/import.mts': `
+				import { count as firstCount, url as firstUrl } from './config.ts?x=1';
+				import { count as secondCount, url as secondUrl } from './config.ts?x=2';
+				import { count as firstAgainCount, url as firstAgainUrl } from './config.ts?x=1';
+
+				export default {
+					first: {
+						count: firstCount,
+						url: firstUrl,
+					},
+					second: {
+						count: secondCount,
+						url: secondUrl,
+					},
+					firstAgain: {
+						count: firstAgainCount,
+						url: firstAgainUrl,
+					},
+				};
+				`,
+		});
+
+		const process = await node.tsx(['runner.mts'], fixture.path);
+		expect(process.failed).toBe(false);
+		expect(process.stderr).toBe('');
+		expect(JSON.parse(process.stdout)).toEqual({
+			static: {
+				metaUrl: pathToFileURL(fixture.getPath('named/config.ts')).toString(),
+				namedResult: 'static:suffix',
+				namedType: 'function',
+			},
+			staticCts: node.supports.cjsInterop ? 'cts-named' : null,
+			staticNamespace: (
+				node.supports.esmLoadReadFile
+					? {
+						defaultResult: 'static-namespace-default:suffix',
+						hasNamed: true,
+						metaUrl: pathToFileURL(fixture.getPath('namespace/config.ts')).toString(),
+						namedResult: 'static-namespace-named:suffix',
+						namedType: 'function',
+					}
+					: {
+						defaultResult: 'static-namespace-default:suffix',
+						hasNamed: false,
+						namedResult: null,
+						namedType: 'undefined',
+					}
+			),
+			staticNamespaceRequire: path.sep,
+			dynamicBeforeStatic: [
+				'dynamic-before-static:suffix',
+				'static-after-dynamic:suffix',
+			],
+			staticRequire: [
+				path.sep,
+				path.sep,
+			],
+			dynamic: {
+				defaultResult: 'dynamic-default:suffix',
+				hasNamed: true,
+				metaUrl: pathToFileURL(fixture.getPath('dynamic/config.ts')).toString(),
+				namedResult: 'dynamic-named:suffix',
+				namedType: 'function',
+			},
+			dynamicRequire: path.sep,
+			defaultImportKeepsCjsGlobals: {
+				cacheDefined: true,
+			},
+			commentedNamedBindings: path.sep,
+			queryIdentity: {
+				first: {
+					count: 1,
+					url: `${pathToFileURL(fixture.getPath('query/config.ts'))}?x=1`,
+				},
+				second: {
+					count: 2,
+					url: `${pathToFileURL(fixture.getPath('query/config.ts'))}?x=2`,
+				},
+				firstAgain: {
+					count: 1,
+					url: `${pathToFileURL(fixture.getPath('query/config.ts'))}?x=1`,
+				},
+			},
+		});
+	});
+
+	test('TypeScript import paths preserve literal question marks', async () => {
+		if (process.platform === 'win32') {
+			skip('Windows paths cannot contain literal question marks');
+		}
+
+		await using fixture = await createFixture({
+			'package.json': createPackageJson({ type: 'module' }),
+			'import.mts': 'import "./file%3Fname.ts";',
+			'file?name.ts': 'console.log("literal-question");',
+		});
+
+		const tsxProcess = await node.tsx(['import.mts'], fixture.path);
+
+		expect(tsxProcess.failed).toBe(false);
+		expect(tsxProcess.stderr).toBe('');
+		expect(tsxProcess.stdout).toBe('literal-question');
+	});
+
+	test('tsImport keeps CommonJS-classified TypeScript namespace loads isolated', async () => {
+		if (!node.supports.esmLoadReadFile) {
+			return;
+		}
+
+		await using fixture = await createFixture({
+			'package.json': createPackageJson({ type: 'commonjs' }),
+			'import.mjs': `
+				import { setTimeout } from 'node:timers/promises';
+				import { tsImport } from ${JSON.stringify(tsxEsmApiPath)};
+
+				const first = await tsImport('./file.ts', import.meta.url);
+				await setTimeout(1);
+				const second = await tsImport('./file.ts', import.meta.url);
+				const plainLoaded = await import('./file.ts').then(
+					() => true,
+					() => false,
+				);
+
+				console.log(JSON.stringify({
+					first: {
+						count: first.count,
+						namespaced: first.url.includes('tsx-namespace='),
+					},
+					second: {
+						count: second.count,
+						namespaced: second.url.includes('tsx-namespace='),
+					},
+					plainLoaded,
+				}));
+				`,
+			'file.ts': `
+				globalThis.__tsxLoadCount = (globalThis.__tsxLoadCount ?? 0) + 1;
+
+				export const count = globalThis.__tsxLoadCount;
+				export const url = import.meta.url;
+				export default { count, url };
+				`,
+		});
+
+		const process = await execaNode(fixture.getPath('import.mjs'), [], {
+			nodePath: node.path,
+			nodeOptions: ['--no-warnings'],
+			reject: false,
+		});
+
+		expect(process.exitCode).toBe(0);
+		expect(process.stderr).toBe('');
+		expect(JSON.parse(process.stdout)).toEqual({
+			first: {
+				count: 1,
+				namespaced: true,
+			},
+			second: {
+				count: 2,
+				namespaced: true,
+			},
+			plainLoaded: false,
+		});
+	});
+
 	test('CJS namespace import shape depends on Node version', async () => {
 		await using fixture = await createFixture({
 			'package.json': createPackageJson({ type: 'module' }),
@@ -263,7 +601,12 @@ export const versionSensitiveTests = (node: NodeApis) => describe('Version-sensi
 
 		expect(tsxProcess.failed).toBe(false);
 		const namespace = JSON.parse(tsxProcess.stdout);
-		if (node.supports.moduleRegisterHooksCjsReload) {
+		const supportsTransformedCjsNamespace = (
+			node.supports.cjsInterop
+			&& node.supports.moduleRegisterHooksCjsReload
+		);
+
+		if (supportsTransformedCjsNamespace && node.supports.cjsNamespaceModuleExports) {
 			expect(namespace).toEqual({
 				default: {
 					default: 1,
@@ -286,7 +629,7 @@ export const versionSensitiveTests = (node: NodeApis) => describe('Version-sensi
 					named: 2,
 				},
 			});
-		} else if (node.supports.cjsInterop) {
+		} else if (supportsTransformedCjsNamespace) {
 			expect(namespace).toEqual({
 				default: {
 					default: 1,

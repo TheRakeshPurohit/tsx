@@ -3,6 +3,7 @@ import { execaNode, type NodeOptions } from 'execa';
 import { onTestFail, onTestFinish } from 'manten';
 import {
 	cjsNamespaceFromLoadHook,
+	esmLoadReadFile,
 	isFeatureSupported,
 	isFeatureSupportedInRange,
 	modulePackageMainResolution,
@@ -90,6 +91,8 @@ export const createNode = async (
 		moduleRegister: isFeatureSupported(moduleRegister, versionParsed),
 
 		moduleRegisterHooksCjsReload: isFeatureSupported(moduleRegisterHooksCjsReload, versionParsed),
+
+		esmLoadReadFile: isFeatureSupported(esmLoadReadFile, versionParsed),
 
 		importMetaPathProperties: isFeatureSupported(importMetaPathProperties, versionParsed),
 

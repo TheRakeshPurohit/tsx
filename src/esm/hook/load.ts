@@ -1,4 +1,4 @@
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readFileSync } from 'node:fs';
 import type { LoadHook, LoadHookSync } from 'node:module';
 import { readFile } from 'node:fs/promises';
@@ -11,10 +11,23 @@ import { isFeatureSupported, importAttributes, esmLoadReadFile } from '../../uti
 import { isGlobalCjsLoaderActive } from '../../utils/cjs-loader-state.js';
 import { parent } from '../../utils/ipc/client.js';
 import type { Message } from '../types.js';
-import { isJsonPattern, tsExtensionsPattern, fileUrlPrefix } from '../../utils/path-utils.js';
+import {
+	isJsonPattern,
+	tsExtensionsPattern,
+	fileUrlPrefix,
+	implicitTsExtensionsPattern,
+} from '../../utils/path-utils.js';
 import { isESM } from '../../utils/es-module-lexer.js';
 import { logEsm as log, debugEnabled } from '../../utils/debug.js';
-import { getNamespace } from './utils.js';
+import {
+	commonJsExportPreparseSearchParameter,
+	commonJsVirtualQuerySearchParameter,
+	getSearchWithoutParameters,
+	getQueryWithoutParameters,
+	namespaceQuery,
+	getNamespace,
+	moduleSourceByUrl,
+} from './utils.js';
 import { data as defaultData, type Data } from './initialize.js';
 
 const importAttributesProperty = (
@@ -37,6 +50,15 @@ const isModuleTypeScriptFormat = (
 	|| format === 'typescript'
 );
 
+const supportsEsmLoadReadFile = isFeatureSupported(esmLoadReadFile);
+
+const commonJsVirtualQueryParameters = [`${commonJsVirtualQuerySearchParameter}=`];
+
+const commonJsInternalQueryParameters = [
+	`${commonJsExportPreparseSearchParameter}=`,
+	`${commonJsVirtualQuerySearchParameter}=`,
+];
+
 const getTsconfigRaw = (
 	filePath: string,
 	hookData: Data,
@@ -45,6 +67,84 @@ const getTsconfigRaw = (
 		? hookData.parsedTsconfig.config as TransformOptions['tsconfigRaw']
 		: undefined
 );
+
+const getFilePathFromVirtualQuery = (
+	fileUrl: URL,
+) => {
+	if (!fileUrl.searchParams.has(commonJsVirtualQuerySearchParameter)) {
+		return;
+	}
+
+	const { pathname } = fileUrl;
+	const queryIndex = pathname.toLowerCase().lastIndexOf('%3f');
+	if (queryIndex === -1) {
+		return;
+	}
+
+	const cleanFileUrl = new URL(fileUrl);
+	cleanFileUrl.pathname = pathname.slice(0, queryIndex);
+	cleanFileUrl.search = '';
+	return fileURLToPath(cleanFileUrl);
+};
+
+const getFileLoadContext = (
+	url: string,
+) => {
+	const fileUrl = url.startsWith(fileUrlPrefix) ? new URL(url) : undefined;
+	const rawFilePath = fileUrl ? fileURLToPath(fileUrl) : url;
+	const virtualFilePath = fileUrl && getFilePathFromVirtualQuery(fileUrl);
+	const filePath = virtualFilePath || rawFilePath;
+	const loadUrl = (
+		fileUrl && virtualFilePath
+			? (
+				pathToFileURL(filePath).toString()
+				+ getSearchWithoutParameters(fileUrl.search, commonJsVirtualQueryParameters)
+			)
+			: url
+	);
+
+	return {
+		fileUrl,
+		filePath,
+		loadUrl,
+	};
+};
+
+const getTransformPath = (
+	filePath: string,
+	fileUrl: URL | undefined,
+) => {
+	if (!fileUrl?.search) {
+		return filePath;
+	}
+
+	const search = getSearchWithoutParameters(fileUrl.search, commonJsInternalQueryParameters);
+	return search ? pathToFileURL(filePath).toString() + search : filePath;
+};
+
+const getFilePathWithQuery = (
+	filePath: string,
+	fileUrl: URL | undefined,
+	urlNamespace: string | undefined,
+) => {
+	const query = [
+		...(
+			fileUrl
+				? getQueryWithoutParameters(fileUrl.search, [
+					namespaceQuery,
+					...commonJsInternalQueryParameters,
+				]).split('&').filter(Boolean)
+				: []
+		),
+		...(
+			urlNamespace
+				? [`namespace=${encodeURIComponent(urlNamespace)}`]
+				: []
+		),
+	].join('&');
+
+	return query ? `${filePath}?${query}` : filePath;
+};
 
 type LoadResult = Awaited<ReturnType<LoadHook>> & {
 	responseURL?: string;
@@ -56,7 +156,15 @@ const notifyLoad = (
 	url: string,
 ) => {
 	const parsedUrl = new URL(url);
+	const filePath = url.startsWith(fileUrlPrefix)
+		? getFileLoadContext(url).filePath
+		: undefined;
 	parsedUrl.searchParams.delete('tsx-namespace');
+	parsedUrl.searchParams.delete(commonJsExportPreparseSearchParameter);
+	parsedUrl.searchParams.delete(commonJsVirtualQuerySearchParameter);
+	if (filePath) {
+		parsedUrl.pathname = new URL(pathToFileURL(filePath)).pathname;
+	}
 	const cleanUrl = parsedUrl.toString();
 
 	if (hookData.port) {
@@ -67,6 +175,8 @@ const notifyLoad = (
 	}
 
 	hookData.onImport?.(cleanUrl);
+
+	return cleanUrl;
 };
 
 const prepareLoad = (
@@ -82,7 +192,7 @@ const prepareLoad = (
 		return false;
 	}
 
-	notifyLoad(hookData, url);
+	const cleanUrl = notifyLoad(hookData, url);
 
 	/*
 	Filter out node:*
@@ -91,7 +201,7 @@ const prepareLoad = (
 	if (parent.send) {
 		parent.send({
 			type: 'dependency',
-			path: url,
+			path: cleanUrl,
 		});
 	}
 
@@ -140,58 +250,105 @@ export const createLoad = (
 		}
 
 		const urlNamespace = getNamespace(url);
-		const loadContext = prepareJsonAttributes(url, context);
+		const { fileUrl, filePath, loadUrl } = getFileLoadContext(url);
+		const loadContext = prepareJsonAttributes(loadUrl, context);
 
-		const loaded = await nextLoad(url, loadContext) as LoadResult;
+		const loaded = await nextLoad(loadUrl, loadContext) as LoadResult;
 		log(3, 'loaded by next loader', {
 			url,
+			loadUrl,
 			loaded,
 		});
 
-		const filePath = url.startsWith(fileUrlPrefix) ? fileURLToPath(url) : url;
+		const shouldPreparseCommonJsExports = (
+			fileUrl?.searchParams.has(commonJsExportPreparseSearchParameter) === true
+		);
 		const loadedFormat = loaded.format as string | undefined;
+		const cleanImportMetaUrl = fileUrl ? new URL(pathToFileURL(filePath)) : undefined;
+		if (cleanImportMetaUrl && fileUrl) {
+			cleanImportMetaUrl.search = getSearchWithoutParameters(
+				fileUrl.search,
+				commonJsInternalQueryParameters,
+			);
+		}
 
 		if (
 			isCommonJsFormat(loadedFormat)
-			&& isFeatureSupported(esmLoadReadFile)
+			&& fileUrl
 			&& loaded.responseURL?.startsWith('file:') // Could be data:
 			&& !filePath.endsWith('.cjs') // CJS syntax doesn't need to be transformed for interop
 		) {
-			const code = await readFile(new URL(url), 'utf8');
+			const code = await readFile(pathToFileURL(filePath), 'utf8');
+			const hasEsmSyntax = isESM(code);
 
 			// if the file extension is .js, only transform if using esm syntax
-			if (loadedFormat === 'commonjs-typescript' || !filePath.endsWith('.js') || isESM(code)) {
+			if (loadedFormat === 'commonjs-typescript' || !filePath.endsWith('.js') || hasEsmSyntax) {
+				if (!supportsEsmLoadReadFile) {
+					if (
+						shouldPreparseCommonJsExports
+						&& hasEsmSyntax
+						&& implicitTsExtensionsPattern.test(filePath)
+					) {
+						// Entries keep CommonJS package semantics; only imports marked in resolve
+						// fall back to ESM so Node can see their named exports.
+						const transformed = await transform(
+							code,
+							filePath,
+							{
+								define: {
+									'import.meta.url': JSON.stringify(cleanImportMetaUrl!.toString()),
+								},
+								tsconfigRaw: getTsconfigRaw(filePath, hookData),
+							},
+						);
+						moduleSourceByUrl.set(url, transformed.code);
+
+						return {
+							format: 'module',
+							source: inlineSourceMap(transformed),
+						};
+					}
+
+					return loaded;
+				}
+
+				if (!urlNamespace && !shouldPreparseCommonJsExports && !filePath.endsWith('.cts')) {
+					return loaded;
+				}
+
 				/**
-				 * es or cjs module lexer unfortunately cannot be used because it doesn't support
-				 * typescript syntax
+				 * es-module-lexer/cjs-module-lexer can't parse TypeScript syntax.
+				 * Transform first so Node can preparse esbuild's CJS export annotation
+				 * and evaluate the same source from the original file URL.
 				 *
-				 * In the normal CJS annotation path, only the exports are used for parsing.
-				 * In fact, the code can't even run because imports cannot be resolved relative
-				 * from the data: URL.
-				 *
-				 * This should pre-compile for the CJS loader to have a cache hit
-				 *
-				 * I considered extracting the CJS exports from esbuild via (0&&(module.exports={})
-				 * to minimize the data URL size but this only works for ESM->CJS and not CTS files
-				 * which are already in CJS syntax.
-				 * In CTS, module.exports can be written in any pattern.
+				 * Returning only an export annotation would be smaller, but that only
+				 * works for ESM->CJS output. CTS files are already CJS, so module.exports
+				 * can be written in any pattern.
 				 */
+				const shouldUseDataResponseUrl = Boolean(
+					urlNamespace
+					|| shouldPreparseCommonJsExports
+					|| getSearchWithoutParameters(fileUrl.search, commonJsInternalQueryParameters),
+				);
 				const transformed = transformSync(
 					code,
-					filePath,
+					getTransformPath(filePath, fileUrl),
 					{
+						cjsBanner: (
+							shouldUseDataResponseUrl
+								? `require = require("node:module").createRequire(${JSON.stringify(pathToFileURL(filePath).toString())});`
+								: undefined
+						),
 						tsconfigRaw: getTsconfigRaw(filePath, hookData),
 					},
 				);
 
-				const filePathWithNamespace = urlNamespace ? `${filePath}?namespace=${encodeURIComponent(urlNamespace)}` : filePath;
-
 				loaded.format = 'commonjs';
-				if (loadedFormat === 'commonjs-typescript' || filePath.endsWith('.cts')) {
-					// Avoid Node's strip-only TypeScript CJS loader for syntax esbuild supports.
-					loaded.source = inlineSourceMap(transformed);
+				loaded.source = inlineSourceMap(transformed);
+				if (shouldUseDataResponseUrl) {
+					const filePathWithQuery = getFilePathWithQuery(filePath, fileUrl, urlNamespace);
+					loaded.responseURL = `data:text/javascript,${encodeURIComponent(transformed.code)}?filePath=${encodeURIComponent(filePathWithQuery)}`;
 				}
-				loaded.responseURL = `data:text/javascript,${encodeURIComponent(transformed.code)}?filePath=${encodeURIComponent(filePathWithNamespace)}`;
 
 				log(3, 'returning CJS export annotation', loaded);
 				return loaded;
@@ -234,6 +391,7 @@ export const createLoad = (
 					tsconfigRaw: getTsconfigRaw(filePath, hookData),
 				},
 			);
+			moduleSourceByUrl.set(url, transformed.code);
 
 			return {
 				format: 'module',
@@ -245,6 +403,9 @@ export const createLoad = (
 			const dynamicImportTransformed = transformDynamicImport(filePath, code);
 			if (dynamicImportTransformed) {
 				loaded.source = inlineSourceMap(dynamicImportTransformed);
+				moduleSourceByUrl.set(url, dynamicImportTransformed.code);
+			} else {
+				moduleSourceByUrl.set(url, code);
 			}
 		}
 
@@ -293,15 +454,16 @@ export const createLoadSync = (
 		}
 
 		const urlNamespace = getNamespace(url);
-		const loadContext = prepareJsonAttributes(url, context);
+		const { fileUrl, filePath, loadUrl } = getFileLoadContext(url);
+		const loadContext = prepareJsonAttributes(loadUrl, context);
 
-		const loaded = nextLoad(url, loadContext) as LoadResult;
+		const loaded = nextLoad(loadUrl, loadContext) as LoadResult;
 		log(3, 'loaded by next loader', {
 			url,
+			loadUrl,
 			loaded,
 		});
 
-		const filePath = url.startsWith(fileUrlPrefix) ? fileURLToPath(url) : url;
 		const loadedFormat = loaded.format as string | undefined;
 
 		if (
@@ -310,30 +472,30 @@ export const createLoadSync = (
 			&& loaded.responseURL?.startsWith('file:') // Could be data:
 			&& !filePath.endsWith('.cjs') // CJS syntax doesn't need to be transformed for interop
 		) {
-			const code = readFileSync(new URL(url), 'utf8');
+			const code = readFileSync(pathToFileURL(filePath), 'utf8');
 
 			// if the file extension is .js, only transform if using esm syntax
 			if (loadedFormat === 'commonjs-typescript' || !filePath.endsWith('.js') || isESM(code)) {
 				const transformed = transformSync(
 					code,
-					filePath,
+					getTransformPath(filePath, fileUrl),
 					{
 						tsconfigRaw: getTsconfigRaw(filePath, hookData),
 					},
 				);
 
-				const filePathWithNamespace = urlNamespace ? `${filePath}?namespace=${encodeURIComponent(urlNamespace)}` : filePath;
 				// Node only preserves CJS globals/cache when it re-enters Module._load,
 				// and skips module hooks on that path.
 				// https://github.com/nodejs/node/blob/v26.1.0/lib/internal/modules/esm/translators.js#L335-L352
 				const shouldReloadByCJSLoader = !urlNamespace && isGlobalCjsLoaderActive();
+				const filePathWithQuery = getFilePathWithQuery(filePath, fileUrl, urlNamespace);
 
 				loaded.format = 'commonjs';
 				loaded.shouldBeReloadedByCJSLoader = shouldReloadByCJSLoader;
 				// Avoid Node's strip-only TypeScript CJS loader for syntax esbuild supports.
 				loaded.source = inlineSourceMap(transformed);
 				if (!shouldReloadByCJSLoader) {
-					loaded.responseURL = `data:text/javascript,${encodeURIComponent(transformed.code)}?filePath=${encodeURIComponent(filePathWithNamespace)}`;
+					loaded.responseURL = `data:text/javascript,${encodeURIComponent(transformed.code)}?filePath=${encodeURIComponent(filePathWithQuery)}`;
 				}
 
 				log(3, 'returning CJS export annotation', loaded);

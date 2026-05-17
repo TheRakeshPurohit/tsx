@@ -222,7 +222,12 @@ export const smoke = ({ tsx, supports }: NodeApis) => describe('Smoke', () => {
 					expect(p.stdout).toMatch(/\{"importMetaUrl":"file:\/\/\/.+?\/js\/index\.js","__filename":".+?index\.js"\}/);
 					expect(p.stdout).toMatch(/\{"importMetaUrl":"file:\/\/\/.+?\/js\/index\.js\?query=123","__filename":".+?index\.js"\}/);
 				} else {
-					if (supports.moduleRegisterHooksCjsReload) {
+					const supportsTransformedCjsNamespace = (
+						supports.cjsInterop
+						&& supports.moduleRegisterHooksCjsReload
+					);
+
+					if (supportsTransformedCjsNamespace && supports.cjsNamespaceModuleExports) {
 						expect(smokeOutput.pkgCommonjs).toEqual({
 							default: {
 								default: 1,
@@ -245,7 +250,7 @@ export const smoke = ({ tsx, supports }: NodeApis) => describe('Smoke', () => {
 								named: 2,
 							},
 						});
-					} else if (supports.cjsInterop) {
+					} else if (supportsTransformedCjsNamespace) {
 						expect(smokeOutput.pkgCommonjs).toEqual({
 							default: {
 								default: 1,
@@ -521,7 +526,12 @@ export const smoke = ({ tsx, supports }: NodeApis) => describe('Smoke', () => {
 					expect(p.stdout).toMatch(/\{"importMetaUrl":"file:\/\/\/.+?\/js\/index\.js","__filename":".+?index\.js"\}/);
 					expect(p.stdout).toMatch(/\{"importMetaUrl":"file:\/\/\/.+?\/js\/index\.js\?query=123","__filename":".+?index\.js"\}/);
 				} else {
-					if (supports.moduleRegisterHooksCjsReload) {
+					const supportsTransformedCjsNamespace = (
+						supports.cjsInterop
+						&& supports.moduleRegisterHooksCjsReload
+					);
+
+					if (supportsTransformedCjsNamespace && supports.cjsNamespaceModuleExports) {
 						expect(smokeOutput.pkgCommonjs).toEqual({
 							default: {
 								default: 1,
@@ -544,7 +554,7 @@ export const smoke = ({ tsx, supports }: NodeApis) => describe('Smoke', () => {
 								named: 2,
 							},
 						});
-					} else if (supports.cjsInterop) {
+					} else if (supportsTransformedCjsNamespace) {
 						expect(smokeOutput.pkgCommonjs).toEqual({
 							default: {
 								default: 1,
