@@ -231,10 +231,10 @@ const prepareJsonAttributes = (
 };
 
 const isCommonJsRequireContext = (
-	context: Parameters<LoadHook>[1],
+	{ conditions }: Parameters<LoadHook>[1],
 ) => (
-	context.conditions.includes('require')
-	&& !context.conditions.includes('import')
+	conditions?.includes('require') === true
+	&& !conditions.includes('import')
 );
 
 export const createLoad = (
@@ -361,6 +361,9 @@ export const createLoad = (
 		}
 
 		const code = loaded.source.toString();
+		// CJS JSON require still parses hook source as JSON after module hooks.
+		// https://github.com/nodejs/node/blob/v24.15.0/lib/internal/modules/cjs/loader.js#L1969-L1978
+		const shouldTransformJson = loadedFormat === 'json' && !isCommonJsRequireContext(context);
 
 		if (loadedFormat === 'commonjs-typescript') {
 			const transformed = transformSync(
@@ -380,7 +383,7 @@ export const createLoad = (
 
 		if (
 			// Support named imports in JSON modules
-			loaded.format === 'json'
+			shouldTransformJson
 			|| isModuleTypeScriptFormat(loadedFormat)
 			|| tsExtensionsPattern.test(url)
 		) {
@@ -509,6 +512,9 @@ export const createLoadSync = (
 		}
 
 		const code = loaded.source.toString();
+		// CJS JSON require still parses hook source as JSON after module hooks.
+		// https://github.com/nodejs/node/blob/v24.15.0/lib/internal/modules/cjs/loader.js#L1969-L1978
+		const shouldTransformJson = loadedFormat === 'json' && !isCommonJsRequireContext(context);
 
 		if (loadedFormat === 'commonjs-typescript') {
 			const transformed = transformSync(
@@ -529,7 +535,7 @@ export const createLoadSync = (
 
 		if (
 			// Support named imports in JSON modules
-			loaded.format === 'json'
+			shouldTransformJson
 			|| isModuleTypeScriptFormat(loadedFormat)
 			|| tsExtensionsPattern.test(url)
 		) {

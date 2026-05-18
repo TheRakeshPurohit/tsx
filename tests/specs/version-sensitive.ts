@@ -136,6 +136,36 @@ export const versionSensitiveTests = (node: NodeApis) => describe('Version-sensi
 			);
 		});
 
+		test('sync ESM hook preserves CJS JSON require', async () => {
+			await using fixture = await createFixture({
+				'package.json': createPackageJson({ type: 'commonjs' }),
+				'entry.cjs': 'require("fake-mocha/lib/mocha.js");',
+				'node_modules/fake-mocha': {
+					'package.json': createPackageJson({ type: 'commonjs' }),
+					lib: {
+						'mocha.js': `
+							const mocharc = require("./mocharc.json");
+
+							console.log(JSON.stringify(mocharc));
+							`,
+						'mocharc.json': JSON.stringify({
+							diff: true,
+							extension: ['js', 'cjs', 'mjs'],
+						}),
+					},
+				},
+			});
+
+			const process = await node.hook(['entry.cjs'], fixture.path);
+
+			expect(process.exitCode).toBe(0);
+			expect(process.stderr).toBe('');
+			expect(JSON.parse(process.stdout)).toEqual({
+				diff: true,
+				extension: ['js', 'cjs', 'mjs'],
+			});
+		});
+
 		await test('watch reruns when imported TypeScript file changes', async () => {
 			await using fixture = await createFixture({
 				'package.json': createPackageJson({ type: 'commonjs' }),
