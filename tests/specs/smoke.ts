@@ -322,7 +322,7 @@ export const smoke = ({ tsx, supports }: NodeApis) => describe('Smoke', () => {
 
 					// absolute file url
 					import ${JSON.stringify(
-						new URL('js/index.js', pathToFileURL(fixturePath)).toString(),
+						pathToFileURL(path.join(fixturePath, 'js/index.js')).toString(),
 					)};
 
 					// No double .default.default in Dynamic Import
