@@ -233,6 +233,39 @@ export const versionSensitiveTests = (node: NodeApis) => describe('Version-sensi
 			expect(process.stdout).toBe('entrypoint:run');
 		});
 
+		// Regression guard for https://github.com/privatenumber/tsx/issues/761:
+		// a dependency that ships ESM via exports.import but omits "type" was
+		// classified as CJS and lost its named exports. The contract relies on
+		// Node's default-on syntax detection (>= 20.19.0 / >= 22.7.0) to recover
+		// the ESM namespace through CJS<->ESM interop, so gate on requireEsm.
+		if (node.supports.requireEsm) {
+			test('imports ESM-syntax package with omitted "type" via exports.import', async () => {
+				await using fixture = await createFixture({
+					'package.json': createPackageJson({ type: 'module' }),
+					'entry.ts': `
+						import { hello } from 'module-a';
+
+						console.log(hello());
+						`,
+					'node_modules/module-a': {
+						'package.json': createPackageJson({
+							name: 'module-a',
+							exports: {
+								'.': { import: './index.js' },
+							},
+						}),
+						'index.js': "export const hello = () => 'hello world from esm';",
+					},
+				});
+
+				const { exitCode, stderr, stdout } = await node.tsx(['entry.ts'], fixture.path);
+
+				expect(exitCode).toBe(0);
+				expect(stderr).toBe('');
+				expect(stdout).toBe('hello world from esm');
+			});
+		}
+
 		test('dynamic TypeScript import evaluates with an async loader hook', async () => {
 			await using fixture = await createFixture({
 				'package.json': createPackageJson({ type: 'module' }),
