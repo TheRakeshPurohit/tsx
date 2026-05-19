@@ -2,6 +2,7 @@ import {
 	describe, test, onTestFail, expect,
 } from 'manten';
 import { createFixture } from 'fs-fixture';
+import { outdent } from 'outdent';
 import type { NodeApis } from '../utils/tsx.js';
 import {
 	createPackageJson,
@@ -144,6 +145,51 @@ export const commonJsModeContracts = (node: NodeApis) => describe('CommonJS mode
 				exitCode: 0,
 				stdout: 'imported',
 				stderr: '',
+			});
+		}
+	});
+
+	// Regression guard for two closed bugs that lacked paired tests:
+	// - https://github.com/privatenumber/tsx/issues/694 -- Node 23.6+ classified
+	//   .ts entrypoints as ESM in CJS-shaped packages, breaking __dirname and
+	//   __filename ("not defined in ES module scope").
+	// - https://github.com/privatenumber/tsx/issues/726 -- v4.20 returned undefined
+	//   for require.cache; reverted in v4.20.3 without a paired test.
+	test('CJS-classified .ts entrypoint exposes __dirname, __filename, and require.cache', async () => {
+		for (const { label, packageJson } of commonJsModes) {
+			await using fixture = await createFixture({
+				'package.json': createPackageJson(packageJson),
+				'index.ts': outdent`
+					require('./dep.cjs');
+					console.log(JSON.stringify({
+						dirname: __dirname,
+						filename: __filename,
+						requireCacheType: typeof require.cache,
+						requireCacheHasKeys: Object.keys(require.cache).length > 0,
+					}));
+				`,
+				'dep.cjs': 'module.exports = { loaded: true };',
+			});
+
+			const result = await node.tsx(['index.ts'], fixture.path);
+			onTestFail(() => {
+				console.log(label, result);
+			});
+
+			expect({
+				failed: result.failed,
+				exitCode: result.exitCode,
+				stderr: result.stderr,
+			}).toEqual({
+				failed: false,
+				exitCode: 0,
+				stderr: '',
+			});
+			expect(JSON.parse(result.stdout)).toEqual({
+				dirname: fixture.path,
+				filename: fixture.getPath('index.ts'),
+				requireCacheType: 'object',
+				requireCacheHasKeys: true,
 			});
 		}
 	});
