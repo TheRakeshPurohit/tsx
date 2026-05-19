@@ -151,6 +151,20 @@ type LoadResult = Awaited<ReturnType<LoadHook>> & {
 	shouldBeReloadedByCJSLoader?: boolean;
 };
 
+// nextLoad() can return ArrayBuffer/TypedArray source; Node decodes text
+// formats after the hook chain, but tsx transforms before returning.
+// https://github.com/nodejs/node/pull/55698
+// https://github.com/nodejs/node/blob/v26.0.0/lib/internal/modules/customization_hooks.js#L374-L390
+const textDecoder = new TextDecoder();
+
+const decodeSource = (
+	source: NonNullable<LoadResult['source']>,
+) => (
+	typeof source === 'string'
+		? source
+		: textDecoder.decode(source)
+);
+
 const notifyLoad = (
 	hookData: Data,
 	url: string,
@@ -360,7 +374,7 @@ export const createLoad = (
 			return loaded;
 		}
 
-		const code = loaded.source.toString();
+		const code = decodeSource(loaded.source);
 		// CJS JSON require still parses hook source as JSON after module hooks.
 		// https://github.com/nodejs/node/blob/v24.15.0/lib/internal/modules/cjs/loader.js#L1969-L1978
 		const shouldTransformJson = loadedFormat === 'json' && !isCommonJsRequireContext(context);
@@ -511,7 +525,7 @@ export const createLoadSync = (
 			return loaded;
 		}
 
-		const code = loaded.source.toString();
+		const code = decodeSource(loaded.source);
 		// CJS JSON require still parses hook source as JSON after module hooks.
 		// https://github.com/nodejs/node/blob/v24.15.0/lib/internal/modules/cjs/loader.js#L1969-L1978
 		const shouldTransformJson = loadedFormat === 'json' && !isCommonJsRequireContext(context);

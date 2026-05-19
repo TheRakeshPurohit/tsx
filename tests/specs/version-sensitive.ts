@@ -233,6 +233,57 @@ export const versionSensitiveTests = (node: NodeApis) => describe('Version-sensi
 			expect(process.stdout).toBe('entrypoint:run');
 		});
 
+		test('dynamic TypeScript import evaluates with an async loader hook', async () => {
+			await using fixture = await createFixture({
+				'package.json': createPackageJson({ type: 'module' }),
+				'async-hooks.mjs': `
+					export const resolve = async (specifier, context, nextResolve) => (
+						nextResolve(specifier, context)
+					);
+
+					export const load = async (url, context, nextLoad) => (
+						nextLoad(url, context)
+					);
+					`,
+				'entry.ts': `
+					import { register } from 'node:module';
+
+					register('./async-hooks.mjs', import.meta.url);
+
+					const imported = await import('./sibling.ts');
+
+					console.log(JSON.stringify({
+						keys: Object.keys(imported),
+						value: imported.value,
+					}));
+					`,
+				'sibling.ts': `
+					console.log('sibling evaluated');
+
+					export const value = 'loaded';
+					`,
+			});
+
+			const process = await execaNode('entry.ts', {
+				cwd: fixture.path,
+				nodePath: node.path,
+				nodeOptions: [
+					'--import',
+					tsxEsmPath,
+				],
+				reject: false,
+			});
+
+			expect(process.exitCode).toBe(0);
+			expect(process.stdout.split('\n')).toEqual([
+				'sibling evaluated',
+				JSON.stringify({
+					keys: ['value'],
+					value: 'loaded',
+				}),
+			]);
+		});
+
 		test('sync ESM hook preserves CJS JSON require', async () => {
 			await using fixture = await createFixture({
 				'package.json': createPackageJson({ type: 'commonjs' }),
