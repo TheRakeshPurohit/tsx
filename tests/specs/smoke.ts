@@ -584,19 +584,49 @@ export const smoke = ({ tsx, supports }: NodeApis) => describe('Smoke', () => {
 				expect(coverageSourceMapCache).toBe(true);
 			});
 
-			test('resolve ts in exports', async () => {
+			test('resolve package exports', async () => {
 				await using fixture = await createFixture({
 					'package.json': createPackageJson(packageType ? { type: packageType } : {}),
 					'index.ts': `
-					import A from 'pkg'
-					console.log(A satisfies 2)
+					import A from 'pkg';
+					import { named } from 'ambiguous-reexport';
+
+					A satisfies 2;
+					console.log(named);
 					`,
-					'node_modules/pkg': {
-						'package.json': createPackageJson({
-							name: 'pkg',
-							exports: './test.js',
-						}),
-						'test.ts': 'export default 1',
+					node_modules: {
+						// Original package exports check: `exports: './test.js'` should resolve `test.ts`.
+						pkg: {
+							'package.json': createPackageJson({
+								name: 'pkg',
+								exports: './test.js',
+							}),
+							'test.ts': 'export default 1',
+						},
+						// Regression check: no-type packages with CJS `require` and ESM `default`
+						// targets must preserve named reexports from another ambiguous package.
+						'ambiguous-reexport': {
+							'package.json': createPackageJson({
+								name: 'ambiguous-reexport',
+								exports: {
+									require: './index.js',
+									default: './index.module.js',
+								},
+							}),
+							'index.js': 'exports.named = "named";',
+							'index.module.js': 'export * from "ambiguous-dependency";',
+						},
+						'ambiguous-dependency': {
+							'package.json': createPackageJson({
+								name: 'ambiguous-dependency',
+								exports: {
+									require: './index.js',
+									default: './index.module.js',
+								},
+							}),
+							'index.js': 'exports.named = "named";',
+							'index.module.js': 'export const named = "named";',
+						},
 					},
 				});
 
@@ -604,6 +634,8 @@ export const smoke = ({ tsx, supports }: NodeApis) => describe('Smoke', () => {
 					cwd: fixture.path,
 				});
 				expect(p.failed).toBe(false);
+				expect(p.stdout).toBe('named');
+				expect(p.stderr).toBe('');
 			});
 
 			if (supports.modulePackageMainResolution) {
