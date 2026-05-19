@@ -37,14 +37,76 @@ export type Register = {
 
 let cjsInteropApplied = false;
 
+const collectImportSpecifiers = (
+	argv: string[],
+) => {
+	const imports: string[] = [];
+
+	for (let index = 0; index < argv.length; index += 1) {
+		const argument = argv[index]!;
+		if (argument === '--import') {
+			const specifier = argv[index + 1];
+			if (specifier) {
+				imports.push(specifier);
+			}
+			index += 1;
+		} else if (argument.startsWith('--import=')) {
+			imports.push(argument.slice('--import='.length));
+		}
+	}
+
+	return imports;
+};
+
+const collectNodeOptionsImportSpecifiers = () => [
+	...(process.env.NODE_OPTIONS ?? '').matchAll(/(?:^|\s)--import(?:=|\s+)(\S+)/g),
+].map(([, specifier]) => specifier!);
+
+const tsxImportUrls = [
+	// pkgroll emits this register chunk in dist/, next to loader.mjs.
+	new URL('loader.mjs', import.meta.url).toString(),
+	new URL('esm/index.mjs', import.meta.url).toString(),
+];
+
+const tsxImportSpecifiers = new Set([
+	'tsx',
+	'tsx/esm',
+	...tsxImportUrls,
+	...tsxImportUrls.map(url => decodeURI(new URL(url).pathname)),
+]);
+
+const isTsxImport = (
+	specifier: string,
+) => tsxImportSpecifiers.has(specifier);
+
+const isTypeScriptImport = (
+	specifier: string,
+) => /\.(?:[cm]?ts|tsx)(?:[?#].*)?$/.test(specifier);
+
+const hasCliTypeScriptPreload = () => {
+	const imports = collectImportSpecifiers(process.execArgv);
+	const tsxImportIndex = imports.findIndex(isTsxImport);
+	return tsxImportIndex > 0 && imports.slice(0, tsxImportIndex).some(isTypeScriptImport);
+};
+
+const hasTypeScriptPreloadedImport = (
+	collectNodeOptionsImportSpecifiers().some(isTypeScriptImport)
+	|| hasCliTypeScriptPreload()
+);
+
+const supportsRegisterHooks = (
+	typeof module.registerHooks === 'function'
+	&& isFeatureSupported(moduleRegisterHooksCjsReload)
+	// Node does not expose whether a preload installed async hooks. The
+	// failing shape needs a TypeScript preload before tsx, so keep the
+	// async path scoped there to preserve sync registerHooks composition.
+	// https://github.com/nodejs/node/blob/v26.0.0/doc/api/module.md#asynchronous-customization-hooks
+	&& !hasTypeScriptPreloadedImport
+);
+
 export const register: Register = (
 	options,
 ) => {
-	const supportsRegisterHooks = (
-		typeof module.registerHooks === 'function'
-		&& isFeatureSupported(moduleRegisterHooksCjsReload)
-	);
-
 	if (!module.register && !supportsRegisterHooks) {
 		throw new Error(`This version of Node.js (${process.version}) does not support module.register(). Please upgrade to Node v18.19 or v20.6 and above.`);
 	}

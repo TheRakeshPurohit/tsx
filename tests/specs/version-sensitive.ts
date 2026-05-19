@@ -136,6 +136,103 @@ export const versionSensitiveTests = (node: NodeApis) => describe('Version-sensi
 			);
 		});
 
+		test('runs when a TypeScript pre-import registers an async loader', async () => {
+			await using fixture = await createFixture({
+				'package.json': createPackageJson({ type: 'module' }),
+				'hook.ts': `
+					import { register } from 'node:module';
+
+					register('fixture-loader/hook.mjs', import.meta.url);
+					`,
+				// enum forces tsx to actually transform the entrypoint; Node native
+				// type-stripping rejects it, so the assertion proves the loader ran.
+				'main.ts': 'enum Mode { Run = "run" } console.log("entrypoint:" + Mode.Run);',
+				'node_modules/fixture-loader/hook.mjs': `
+					export const resolve = async (specifier, context, nextResolve) => (
+						nextResolve(specifier, context)
+					);
+					`,
+			});
+
+			const { exitCode, stdout } = await node.tsx(['main.ts'], {
+				cwd: fixture.path,
+				env: {
+					NODE_OPTIONS: `--import ${pathToFileURL(fixture.getPath('hook.ts')).toString()}`,
+				},
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stdout).toBe('entrypoint:run');
+		});
+
+		test('runs when a direct TypeScript pre-import registers an async loader', async () => {
+			await using fixture = await createFixture({
+				'package.json': createPackageJson({ type: 'module' }),
+				// .mts hook exercises the non-.ts branch of isTypeScriptImport,
+				// and the --import=<specifier> form below exercises the equals-form
+				// branch of collectImportSpecifiers.
+				'hook.mts': `
+					import { register } from 'node:module';
+
+					register('fixture-loader/hook.mjs', import.meta.url);
+					`,
+				'main.ts': 'enum Mode { Run = "run" } console.log("entrypoint:" + Mode.Run);',
+				'node_modules/fixture-loader/hook.mjs': `
+					export const resolve = async (specifier, context, nextResolve) => (
+						nextResolve(specifier, context)
+					);
+					`,
+			});
+
+			const process = await execaNode('main.ts', {
+				cwd: fixture.path,
+				nodePath: node.path,
+				nodeOptions: [
+					'--import=./hook.mts',
+					'--import',
+					tsxEsmPath,
+				],
+				reject: false,
+			});
+
+			expect(process.exitCode).toBe(0);
+			expect(process.stdout).toBe('entrypoint:run');
+		});
+
+		test('runs when a direct TypeScript pre-import precedes tsx as an absolute path', async () => {
+			await using fixture = await createFixture({
+				'package.json': createPackageJson({ type: 'module' }),
+				'hook.ts': `
+					import { register } from 'node:module';
+
+					register('fixture-loader/hook.mjs', import.meta.url);
+					`,
+				// enum forces tsx to actually transform the entrypoint; Node native
+				// type-stripping rejects it, so the assertion proves the loader ran.
+				'main.ts': 'enum Mode { Run = "run" } console.log("entrypoint:" + Mode.Run);',
+				'node_modules/fixture-loader/hook.mjs': `
+					export const resolve = async (specifier, context, nextResolve) => (
+						nextResolve(specifier, context)
+					);
+					`,
+			});
+
+			const process = await execaNode('main.ts', {
+				cwd: fixture.path,
+				nodePath: node.path,
+				nodeOptions: [
+					'--import',
+					'./hook.ts',
+					'--import',
+					decodeURI(new URL(tsxEsmPath).pathname),
+				],
+				reject: false,
+			});
+
+			expect(process.exitCode).toBe(0);
+			expect(process.stdout).toBe('entrypoint:run');
+		});
+
 		test('sync ESM hook preserves CJS JSON require', async () => {
 			await using fixture = await createFixture({
 				'package.json': createPackageJson({ type: 'commonjs' }),
