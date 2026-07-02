@@ -922,6 +922,53 @@ export const versionSensitiveTests = (node: NodeApis) => describe('Version-sensi
 		});
 	});
 
+	// Each tsImport() registers a fresh copy of the hooks. Hook state must
+	// be per-registration: the async module.register() path loads a
+	// cache-busted `esm/index.mjs?<timestamp>` per call, and if the state
+	// lands in a bundler chunk shared across those copies, every chained
+	// registration claims the latest namespace. Each chain entry then
+	// re-applies TS extension guessing to the failed candidates of the
+	// hook below it, multiplying resolution work per call until imports
+	// stop settling (issue #806).
+	test('repeated tsImport() of a failing import rejects every call (issue #806)', async () => {
+		if (!node.supports.moduleRegister) {
+			return;
+		}
+
+		await using fixture = await createFixture({
+			'package.json': createPackageJson({ type: 'module' }),
+			'fail.ts': "import './missing.js';",
+			'main.mjs': `
+				import { tsImport } from ${JSON.stringify(tsxEsmApiPath)};
+
+				for (let i = 1; i <= 7; i += 1) {
+					const outcome = await tsImport('./fail.ts', import.meta.url).then(
+						() => 'unexpectedly resolved',
+						error => error.code,
+					);
+					console.log(i, outcome);
+				}
+				`,
+		});
+
+		const { stdout, stderr, exitCode } = await execaNode(
+			fixture.getPath('main.mjs'),
+			[],
+			{
+				nodePath: node.path,
+				nodeOptions: ['--no-warnings'],
+				reject: false,
+				timeout: 30_000,
+			},
+		);
+
+		expect(stderr).toBe('');
+		expect(stdout).toBe(
+			Array.from({ length: 7 }, (_, index) => `${index + 1} ERR_MODULE_NOT_FOUND`).join('\n'),
+		);
+		expect(exitCode).toBe(0);
+	});
+
 	test('CJS namespace import shape depends on Node version', async () => {
 		await using fixture = await createFixture({
 			'package.json': createPackageJson({ type: 'module' }),
