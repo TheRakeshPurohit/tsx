@@ -22,6 +22,23 @@ tsExtensions['.jsx'] = ['.tsx', '.ts', '.jsx', '.js'];
 tsExtensions['.cjs'] = ['.cts'];
 tsExtensions['.mjs'] = ['.mts'];
 
+/**
+ * TypeScript resolves these extensions verbatim, so there are no
+ * alternative paths to try. Guessing appended extensions for them
+ * (e.g. `file.ts` -> `file.ts.ts`) only produces misses, and each
+ * miss is expensive: Node decorates ERR_MODULE_NOT_FOUND with a
+ * CommonJS resolution hint, which re-enters the (tsx-patched)
+ * CJS resolver (https://github.com/privatenumber/tsx/issues/809)
+ *
+ * This mirrors esbuild's model, which separates "TypeScript's file
+ * extension swapping" (`.js` -> `.ts`, only for known JS extensions)
+ * from "node's implicit file extension searching" (appending to an
+ * extension-less path). Neither appends onto an existing extension,
+ * so neither produces `file.ts.ts`.
+ * https://github.com/evanw/esbuild/issues/3201
+ */
+const verbatimExtensions = new Set(['.ts', '.tsx', '.mts', '.cts']);
+
 export const mapTsExtensions = (
 	filePath: string,
 ) => {
@@ -29,6 +46,10 @@ export const mapTsExtensions = (
 	const pathQuery = splitPath[1] ? `?${splitPath[1]}` : '';
 	const [pathname] = splitPath;
 	const extension = path.extname(pathname);
+
+	if (verbatimExtensions.has(extension)) {
+		return;
+	}
 
 	const tryPaths: string[] = [];
 
@@ -45,6 +66,8 @@ export const mapTsExtensions = (
 				),
 			),
 		);
+
+		return tryPaths;
 	}
 
 	const guessExtensions = (

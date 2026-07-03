@@ -1,11 +1,34 @@
+import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { mapTsExtensions } from '../../../utils/map-ts-extensions.js';
 import type { NodeError } from '../../../types.js';
 import {
 	isFilePath,
+	isRelativePath,
 	isDirectoryPattern,
 } from '../../../utils/path-utils.js';
 import type { SimpleResolve } from '../types.js';
 import { logCjs as log } from '../../../utils/debug.js';
+
+/**
+ * Failed resolutions are expensive: Module._findPath stats several
+ * implicit extension & index variants before constructing a
+ * MODULE_NOT_FOUND error (https://github.com/privatenumber/tsx/issues/809)
+ *
+ * Skip candidates that can be cheaply confirmed to not exist
+ */
+const candidateDoesntExist = (
+	candidate: string,
+	parentPath: string | undefined,
+) => {
+	let filePath: string | undefined;
+	if (path.isAbsolute(candidate)) {
+		filePath = candidate;
+	} else if (isRelativePath(candidate) && parentPath) {
+		filePath = path.resolve(parentPath, candidate);
+	}
+	return filePath !== undefined && !existsSync(filePath);
+};
 
 /**
  * Typescript gives .ts, .cts, or .mts priority over actual .js, .cjs, or .mjs extensions
@@ -13,6 +36,7 @@ import { logCjs as log } from '../../../utils/debug.js';
 const resolveTsFilename = (
 	resolve: SimpleResolve,
 	request: string,
+	parentPath: string | undefined,
 	isTsParent: boolean,
 	allowJs: boolean,
 ) => {
@@ -35,6 +59,10 @@ const resolveTsFilename = (
 	}
 
 	for (const tryTsPath of tsPath) {
+		if (candidateDoesntExist(tryTsPath, parentPath)) {
+			continue;
+		}
+
 		try {
 			return resolve(tryTsPath);
 		} catch (error) {
@@ -51,6 +79,7 @@ const resolveTsFilename = (
 
 export const createTsExtensionResolver = (
 	nextResolve: SimpleResolve,
+	parentPath: string | undefined,
 	isTsParent: boolean,
 	allowJs: boolean,
 ): SimpleResolve => (
@@ -64,7 +93,13 @@ export const createTsExtensionResolver = (
 
 	// It should only try to resolve TS extensions first if it's a local file (non dependency)
 	if (isFilePath(request)) {
-		const resolvedTsFilename = resolveTsFilename(nextResolve, request, isTsParent, allowJs);
+		const resolvedTsFilename = resolveTsFilename(
+			nextResolve,
+			request,
+			parentPath,
+			isTsParent,
+			allowJs,
+		);
 		if (resolvedTsFilename) {
 			return resolvedTsFilename;
 		}
@@ -81,7 +116,13 @@ export const createTsExtensionResolver = (
 				const isExportsPath = nodeError.message.match(/^Cannot find module '([^']+)'$/);
 				if (isExportsPath) {
 					const exportsPath = isExportsPath[1];
-					const tsFilename = resolveTsFilename(nextResolve, exportsPath, isTsParent, allowJs);
+					const tsFilename = resolveTsFilename(
+						nextResolve,
+						exportsPath,
+						parentPath,
+						isTsParent,
+						allowJs,
+					);
 					if (tsFilename) {
 						return tsFilename;
 					}
@@ -90,14 +131,26 @@ export const createTsExtensionResolver = (
 				const isMainPath = nodeError.message.match(/^Cannot find module '([^']+)'. Please verify that the package.json has a valid "main" entry$/);
 				if (isMainPath) {
 					const mainPath = isMainPath[1];
-					const tsFilename = resolveTsFilename(nextResolve, mainPath, isTsParent, allowJs);
+					const tsFilename = resolveTsFilename(
+						nextResolve,
+						mainPath,
+						parentPath,
+						isTsParent,
+						allowJs,
+					);
 					if (tsFilename) {
 						return tsFilename;
 					}
 				}
 			}
 
-			const resolvedTsFilename = resolveTsFilename(nextResolve, request, isTsParent, allowJs);
+			const resolvedTsFilename = resolveTsFilename(
+				nextResolve,
+				request,
+				parentPath,
+				isTsParent,
+				allowJs,
+			);
 			if (resolvedTsFilename) {
 				return resolvedTsFilename;
 			}

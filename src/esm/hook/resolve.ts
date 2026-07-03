@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type {
 	ResolveHook,
@@ -103,6 +104,45 @@ const isCommonJsRequireContext = (
 	&& !context.conditions.includes('import')
 );
 
+/**
+ * Maps a candidate specifier to a file path if it can be statted directly.
+ * Returns undefined when existence can't be cheaply determined
+ * (e.g. bare specifiers), in which case the candidate must be probed
+ * via nextResolve()
+ */
+const getProbeFilePath = (
+	candidate: string,
+	parentURL: string | undefined,
+) => {
+	const [pathname] = candidate.split('?');
+	try {
+		if (pathname.startsWith(fileUrlPrefix)) {
+			return fileURLToPath(pathname);
+		}
+		if (path.isAbsolute(pathname)) {
+			return pathname;
+		}
+		if (isRelativePath(pathname) && parentURL?.startsWith(fileUrlPrefix)) {
+			return fileURLToPath(new URL(pathname, parentURL));
+		}
+	} catch {}
+};
+
+/**
+ * Failed resolutions are expensive: Node constructs an ERR_MODULE_NOT_FOUND
+ * and decorates it with a CommonJS resolution hint, which re-enters the
+ * (tsx-patched) CJS resolver (https://github.com/privatenumber/tsx/issues/809)
+ *
+ * Skip candidates that can be cheaply confirmed to not exist
+ */
+const candidateDoesntExist = (
+	candidate: string,
+	parentURL: string | undefined,
+) => {
+	const filePath = getProbeFilePath(candidate, parentURL);
+	return filePath !== undefined && !existsSync(filePath);
+};
+
 const resolveExtensions = async (
 	url: string,
 	context: ResolveHookContext,
@@ -122,6 +162,10 @@ const resolveExtensions = async (
 
 	let caughtError: unknown;
 	for (const tsPath of tryPaths) {
+		if (candidateDoesntExist(tsPath, context.parentURL)) {
+			continue;
+		}
+
 		try {
 			return await nextResolve(tsPath, context);
 		} catch (error) {
@@ -138,6 +182,10 @@ const resolveExtensions = async (
 	}
 
 	if (throwError) {
+		if (caughtError === undefined) {
+			// All candidates were skipped; resolve one to produce a real error
+			return nextResolve(tryPaths[0]!, context);
+		}
 		throw caughtError;
 	}
 };
@@ -161,6 +209,10 @@ const resolveExtensionsSync = (
 
 	let caughtError: unknown;
 	for (const tsPath of tryPaths) {
+		if (candidateDoesntExist(tsPath, context.parentURL)) {
+			continue;
+		}
+
 		try {
 			return nextResolve(tsPath, context);
 		} catch (error) {
@@ -177,6 +229,10 @@ const resolveExtensionsSync = (
 	}
 
 	if (throwError) {
+		if (caughtError === undefined) {
+			// All candidates were skipped; resolve one to produce a real error
+			return nextResolve(tryPaths[0]!, context);
+		}
 		throw caughtError;
 	}
 };

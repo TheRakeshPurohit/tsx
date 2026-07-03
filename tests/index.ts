@@ -13,6 +13,7 @@ import { transformSpec } from './specs/transform';
 import { commonJsModeContracts } from './specs/commonjs-mode-contracts';
 import { nodeCapabilitiesSpec } from './specs/node-capabilities';
 import { versionSensitiveTests } from './specs/version-sensitive';
+import { resolutionPriority } from './specs/resolution-priority';
 
 (async () => {
 	// Prevent stuck CI runs
@@ -34,6 +35,7 @@ import { versionSensitiveTests } from './specs/version-sensitive';
 			await versionSensitiveTests(primaryNode);
 			await commonJsModeContracts(primaryNode);
 			await smoke(primaryNode);
+			await resolutionPriority(primaryNode);
 			await api(primaryNode);
 			await cli(primaryNode);
 			await watch(primaryNode);

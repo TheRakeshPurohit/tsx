@@ -87,6 +87,7 @@ export const createResolveFilename = (
 
 	nextResolveSimple = createTsExtensionResolver(
 		nextResolveSimple,
+		parent?.path ?? undefined,
 		Boolean(
 			// If register.namespace is used (e.g. tsx.require())
 			namespace
