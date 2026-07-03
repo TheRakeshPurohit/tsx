@@ -58,6 +58,7 @@
 	"homepage": "https://tsx.hirok.io",
 	"scripts": {
 		"build": "pkgroll --minify",
+		"benchmark": "pnpm build && node ./dist/cli.mjs scripts/benchmark/index.ts",
 		"lint": "lintroll --node --cache --ignore-pattern 'docs/*.md' .",
 		"type-check": "tsc",
 		"test": "pnpm build && node ./dist/cli.mjs tests/index.ts",
