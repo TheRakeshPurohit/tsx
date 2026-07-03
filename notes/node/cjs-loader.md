@@ -60,6 +60,8 @@ tsx resolves TypeScript extensions by trying candidates and catching expected mi
 - `.js`/`.jsx`/`.cjs`/`.mjs` swap candidates do not get extra appended-extension guesses;
 - cheap existence checks skip missing file candidates before invoking Node's expensive failed-resolution path.
 
+This matches the model documented by esbuild (prior art): it separates "TypeScript's file extension swapping" (`.js` → `.ts`, only for known JS extensions) from Node's implicit file extension searching (appending to an extension-less path). Neither appends onto an existing extension, so neither resolves `x.js.ts` from `./x.js` ([evanw/esbuild#3201](https://github.com/evanw/esbuild/issues/3201)).
+
 Rejected alternative: detecting the `resolveAsCommonJS` call frame and skipping work only during error decoration. That would depend on an internal frame name and only treat one symptom. Candidate hygiene reduces the miss count and cost everywhere. The behavior is protected by resolution-priority tests in `tests/specs/resolution-priority.ts`.
 
 ## Implementation history in tsx
