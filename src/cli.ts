@@ -2,9 +2,6 @@ import { constants as osConstants } from 'node:os';
 import type { ChildProcess, Serializable } from 'node:child_process';
 import type { Server } from 'node:net';
 import { cli } from 'cleye';
-import {
-	transformSync as esbuildTransformSync,
-} from 'esbuild';
 import { version } from '../package.json';
 import { run } from './run.js';
 import { watchCommand } from './watch/index.js';
@@ -206,6 +203,9 @@ cli({
 	if (evalType) {
 		const { inputType } = interceptedFlags;
 		const evalCode = interceptedFlags[evalType]!;
+
+		// Lazy-loaded; most runs don't use --eval/--print
+		const { transformSync: esbuildTransformSync } = await import('esbuild');
 		const transformed = esbuildTransformSync(
 			evalCode,
 			{

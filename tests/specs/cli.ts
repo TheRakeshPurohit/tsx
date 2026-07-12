@@ -1,5 +1,6 @@
 import { setTimeout } from 'node:timers/promises';
 import { on, once } from 'node:events';
+import { pathToFileURL } from 'node:url';
 import {
 	describe, test, onFinish, onTestFail, expect,
 } from 'manten';
@@ -204,6 +205,34 @@ export const cli = (node: NodeApis) => describe('CLI', () => {
 			expect(tsxProcess.stdout).toMatch("id: '[eval]'");
 			expect(tsxProcess.stderr).toBe('');
 		});
+	});
+
+	test('doesn\'t load esbuild without --eval or --print', async () => {
+		await using fixture = await createFixture({
+			'block-esbuild.mjs': `
+				export const resolve = (specifier, context, nextResolve) => {
+					if (specifier === 'esbuild') {
+						throw new Error('Unexpected esbuild load');
+					}
+
+					return nextResolve(specifier, context);
+				};
+				`,
+			'index.js': 'console.log("loaded")',
+		});
+
+		const tsxProcess = await tsx(['index.js'], {
+			cwd: fixture.path,
+			nodeOptions: [
+				'--no-warnings',
+				'--experimental-loader',
+				pathToFileURL(fixture.getPath('block-esbuild.mjs')).toString(),
+			],
+		});
+
+		expect(tsxProcess.exitCode).toBe(0);
+		expect(tsxProcess.stdout).toBe('loaded');
+		expect(tsxProcess.stderr).toBe('');
 	});
 
 	if (
