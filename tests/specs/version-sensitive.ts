@@ -922,6 +922,32 @@ export const versionSensitiveTests = (node: NodeApis) => describe('Version-sensi
 		});
 	});
 
+	if (node.supports.moduleRegisterHooksCjsReload) {
+		// https://github.com/privatenumber/tsx/issues/821
+		test('tsImport loads CommonJS TypeScript after the global ESM preload', async () => {
+			await using fixture = await createFixture({
+				'package.json': createPackageJson({ type: 'module' }),
+				'config.cts': 'export default { loaded: true };',
+				'runner.mjs': `
+					import { tsImport } from ${JSON.stringify(tsxEsmApiPath)};
+
+					await tsImport('./config.cts', import.meta.url);
+					console.log('loaded');
+					`,
+			});
+
+			const process = await execaNode(fixture.getPath('runner.mjs'), [], {
+				nodePath: node.path,
+				nodeOptions: ['--import', tsxEsmPath],
+				reject: false,
+			});
+
+			expect(process.exitCode).toBe(0);
+			expect(process.stderr).toBe('');
+			expect(process.stdout).toBe('loaded');
+		});
+	}
+
 	// Each tsImport() registers a fresh copy of the hooks. Hook state must
 	// be per-registration: the async module.register() path loads a
 	// cache-busted `esm/index.mjs?<timestamp>` per call, and if the state

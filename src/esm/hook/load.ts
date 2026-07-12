@@ -202,7 +202,7 @@ const prepareLoad = (
 	}
 
 	const urlNamespace = getNamespace(url);
-	if (hookData.namespace && hookData.namespace !== urlNamespace) {
+	if (hookData.namespace !== urlNamespace) {
 		return false;
 	}
 
