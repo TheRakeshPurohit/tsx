@@ -3,11 +3,17 @@ import {
 	describe, test, onFinish, onTestFinish, onTestFail, expect, skip,
 } from 'manten';
 import { createFixture } from 'fs-fixture';
-import type { NodeApis } from '../utils/tsx.js';
+import { tsxPath, type NodeApis } from '../utils/tsx.js';
+import { ptyShell, isWindows } from '../utils/pty-shell/index.js';
 import { processInteract } from '../utils/process-interact.js';
 import { createPackageJson } from '../fixtures.js';
 
-export const watch = ({ tsx }: NodeApis) => describe('watch', async () => {
+const clearScreenSequence = '\u001Bc';
+const quoteShellArgument = (
+	argument: string,
+) => `'${argument.replaceAll("'", String.raw`'"'"'`)}'`;
+
+export const watch = ({ tsx, path: nodePath }: NodeApis) => describe('watch', async () => {
 	const fixture = await createFixture({
 		// Unnecessary TS to test syntax
 		'log-argv.ts': 'console.log(JSON.stringify(process.argv) as string)',
@@ -63,7 +69,7 @@ export const watch = ({ tsx }: NodeApis) => describe('watch', async () => {
 		expect(all!.startsWith('hello world\n')).toBe(true);
 	}, 10_000);
 
-	await test('suppresses warnings & clear screen', async () => {
+	await test('suppresses warnings & skips clear screen when stdout is piped', async () => {
 		const tsxProcess = tsx(
 			[
 				'watch',
@@ -89,9 +95,42 @@ export const watch = ({ tsx }: NodeApis) => describe('watch', async () => {
 
 		const { all } = await tsxProcess;
 		expect(all).not.toMatch('Warning');
-		expect(all).toMatch('\u001Bc');
+		expect(all).not.toMatch(clearScreenSequence);
 		expect(all!.startsWith('["')).toBeTruthy();
 	}, 10_000);
+
+	await test('clears screen on rerun when stdout is a TTY', async () => {
+		if (isWindows) {
+			// ConPTY re-renders terminal output, so the raw clear sequence
+			// cannot be asserted reliably on Windows
+			skip('ConPTY transforms escape sequences');
+		}
+
+		await using shell = ptyShell();
+		await shell.waitForPrompt();
+		shell.type([
+			nodePath,
+			tsxPath,
+			'watch',
+			fixture.getPath('log-argv.ts'),
+		].map(quoteShellArgument).join(' '));
+		await shell.waitForLine(/\["/);
+		shell.press('\r');
+
+		// Raw output is needed because waitForLine strips ANSI sequences
+		const pollTimeout = Date.now() + 5000;
+		while (!shell.getOutput().includes(clearScreenSequence)) {
+			if (Date.now() > pollTimeout) {
+				break;
+			}
+			await setTimeout(50);
+		}
+
+		onTestFail(() => {
+			console.log({ output: shell.getOutput() });
+		});
+		expect(shell.getOutput()).toMatch(clearScreenSequence);
+	}, 15_000);
 
 	await test('passes flags', async () => {
 		const tsxProcess = tsx(

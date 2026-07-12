@@ -4,6 +4,10 @@ import stripAnsi from 'strip-ansi';
 export const isWindows = process.platform === 'win32';
 const shell = isWindows ? 'powershell.exe' : 'bash';
 const commandCaret = `${isWindows ? '>' : '$'} `;
+const normalizeTerminalOutput = (
+	output: string,
+) => stripAnsi(output)
+	.replaceAll('\r', '');
 
 export const ptyShell = () => {
 	const subprocess = spawn(shell, {
@@ -24,9 +28,14 @@ export const ptyShell = () => {
 	};
 
 	return {
-		waitForPrompt: () => waitFor(subprocess, o => o.endsWith(commandCaret)),
+		waitForPrompt: () => waitFor(
+			subprocess,
+			o => normalizeTerminalOutput(o)
+				.split('\n')
+				.some(line => line.endsWith(commandCaret)),
+		),
 		waitForLine: (pattern: RegExp) => waitFor(subprocess, o => (
-			stripAnsi(o).split('\n').some(line => pattern.test(line.replace(/\r$/, '')))
+			normalizeTerminalOutput(o).split('\n').some(line => pattern.test(line))
 		)),
 		type: (text: string) => subprocess.stdin.write(`${text}\r`),
 		press: (key: string) => subprocess.stdin.write(key),

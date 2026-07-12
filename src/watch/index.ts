@@ -159,7 +159,9 @@ export const watchCommand = command({
 				log(reason, yellow('Rerunning...'));
 			}
 
-			if (options.clearScreen) {
+			// Only clear terminals; control sequences corrupt piped output
+			// https://github.com/privatenumber/tsx/issues/184
+			if (options.clearScreen && process.stdout.isTTY) {
 				process.stdout.write(clearScreen);
 			}
 		}
