@@ -10,6 +10,10 @@ export default defineConfig({
 
 	description,
 
+	sitemap: {
+		hostname: 'https://tsx.hirok.io',
+	},
+
 	lastUpdated: true,
 
 	cleanUrls: true,
