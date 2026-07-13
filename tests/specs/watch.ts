@@ -69,6 +69,202 @@ export const watch = ({ tsx, path: nodePath }: NodeApis) => describe('watch', as
 		expect(all!.startsWith('hello world\n')).toBe(true);
 	}, 10_000);
 
+	await test('watches literal paths containing glob characters', async () => {
+		await using fixtureLiteral = await createFixture({
+			'{env}/index.ts': `
+				import value from './[dependency].ts';
+				console.log(value);
+			`,
+			'{env}/[dependency].ts': 'export default "original"',
+		});
+		const tsxProcess = tsx(
+			['watch', '--clear-screen=false', './{env}/index.ts'],
+			fixtureLiteral.path,
+		);
+		await processInteract(
+			tsxProcess.stdout!,
+			[
+				async ({ output }) => {
+					if (output.includes('original')) {
+						await setTimeout(1000);
+						await fixtureLiteral.writeFile(
+							'{env}/[dependency].ts',
+							'export default "updated"',
+						);
+						return true;
+					}
+				},
+				({ output }) => output.includes('updated'),
+			],
+			9000,
+		);
+
+		tsxProcess.kill();
+		const result = await tsxProcess;
+		expect(result.stderr).toBe('');
+	}, 10_000);
+
+	await test('starts with a bang-prefixed literal entry', async () => {
+		await using fixtureBang = await createFixture({
+			'!entry.ts': 'console.log("bang entry")',
+		});
+		const tsxProcess = tsx(
+			['watch', '--clear-screen=false', './!entry.ts'],
+			fixtureBang.path,
+		);
+		await processInteract(
+			tsxProcess.stdout!,
+			[({ output }) => output.includes('bang entry')],
+			5000,
+		);
+
+		tsxProcess.kill();
+		const result = await tsxProcess;
+		expect(result.stderr).toBe('');
+	}, 10_000);
+
+	await test('starts with only negated include patterns', async () => {
+		await using fixtureNegated = await createFixture({
+			'index.ts': 'console.log("negated include")',
+		});
+		const tsxProcess = tsx(
+			[
+				'watch',
+				'--clear-screen=false',
+				'--include=!ignored/**',
+				'index.ts',
+			],
+			fixtureNegated.path,
+		);
+		await processInteract(
+			tsxProcess.stdout!,
+			[({ output }) => output.includes('negated include')],
+			5000,
+		);
+
+		tsxProcess.kill();
+		const result = await tsxProcess;
+		expect(result.stderr).toBe('');
+	}, 10_000);
+
+	await test('runtime dependencies override exact include negations', async () => {
+		await using fixtureDependency = await createFixture({
+			'index.ts': `
+				import value from './dependency.ts';
+				console.log(value);
+			`,
+			'dependency.ts': 'export default "original"',
+		});
+		const tsxProcess = tsx(
+			[
+				'watch',
+				'--clear-screen=false',
+				'--include=!dependency.ts',
+				'index.ts',
+			],
+			fixtureDependency.path,
+		);
+		await processInteract(
+			tsxProcess.stdout!,
+			[
+				async ({ output }) => {
+					if (output.includes('original')) {
+						await setTimeout(1000);
+						await fixtureDependency.writeFile(
+							'dependency.ts',
+							'export default "updated"',
+						);
+						return true;
+					}
+				},
+				({ output }) => output.includes('updated'),
+			],
+			9000,
+		);
+
+		tsxProcess.kill();
+		const result = await tsxProcess;
+		expect(result.stderr).toBe('');
+	}, 10_000);
+
+	await test('deduplicates overlapping literal and include events', async () => {
+		await using fixtureOverlap = await createFixture({
+			'source/index.ts': 'console.log("RUN: original")',
+		});
+		const tsxProcess = tsx(
+			[
+				'watch',
+				'--clear-screen=false',
+				'--include=source/**/*.ts',
+				'source/index.ts',
+			],
+			fixtureOverlap.path,
+		);
+		await processInteract(
+			tsxProcess.stdout!,
+			[
+				async ({ output }) => {
+					if (output.includes('RUN: original')) {
+						await setTimeout(1000);
+						await fixtureOverlap.writeFile(
+							'source/index.ts',
+							'console.log("RUN: updated")',
+						);
+						return true;
+					}
+				},
+				async ({ output }) => {
+					if (output.includes('RUN: updated')) {
+						await setTimeout(300);
+						return true;
+					}
+				},
+			],
+			9000,
+		);
+
+		tsxProcess.kill();
+		const result = await tsxProcess;
+		expect(result.all!.match(/RUN:/g)?.length).toBe(2);
+		expect(result.all!.match(/Rerunning|Restarting/g)?.length).toBe(1);
+	}, 10_000);
+
+	await test('observes include changes made during the initial run', async () => {
+		await using fixtureStartup = await createFixture({
+			'index.js': `
+				const fs = require('node:fs');
+				const state = fs.readFileSync('state.txt', 'utf8');
+				console.log(state);
+				if (state === 'initial') {
+					fs.writeFileSync('state.txt', 'updated');
+				}
+			`,
+			'state.txt': 'initial',
+		});
+		const tsxProcess = tsx(
+			[
+				'watch',
+				'--clear-screen=false',
+				'--include=!state.txt',
+				`--include=${fixtureStartup.getPath('state.txt')}`,
+				'index.js',
+			],
+			fixtureStartup.path,
+		);
+		await processInteract(
+			tsxProcess.stdout!,
+			[
+				({ output }) => output.includes('initial'),
+				({ output }) => output.includes('updated'),
+			],
+			9000,
+		);
+
+		tsxProcess.kill();
+		const result = await tsxProcess;
+		expect(result.stderr).toBe('');
+	}, 10_000);
+
 	await test('suppresses warnings & skips clear screen when stdout is piped', async () => {
 		const tsxProcess = tsx(
 			[
