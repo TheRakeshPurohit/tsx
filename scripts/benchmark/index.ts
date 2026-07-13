@@ -1,4 +1,5 @@
 import path from 'node:path';
+import os from 'node:os';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { cli } from 'cleye';
@@ -62,6 +63,11 @@ const argv = cli({
 			description: 'Clear the tsx transform cache before every run',
 			default: false,
 		},
+		cacheEntries: {
+			type: Number,
+			description: 'Seed an isolated transform cache with unrelated entries',
+			default: 0,
+		},
 		scale: {
 			type: Boolean,
 			description: `Sweep module counts ${scaleCounts.join('/')} and report per-module cost + fixed tax`,
@@ -76,8 +82,15 @@ const argv = cli({
 });
 
 const {
-	compare, node: nodeVersions, modules, specifier, runs, cold, scale, json,
+	compare, node: nodeVersions, modules, specifier, runs, cold, cacheEntries, scale, json,
 } = argv.flags;
+
+if (cacheEntries < 0 || !Number.isInteger(cacheEntries)) {
+	throw new Error('--cache-entries must be a non-negative integer');
+}
+if (cacheEntries > 0 && cold) {
+	throw new Error('--cache-entries cannot be combined with --cold');
+}
 
 const selectedScenarios = (
 	argv._.scenarios.length > 0
@@ -100,6 +113,45 @@ const clearTransformCache = () => fs.rm(tsxCacheDirectory, {
 	force: true,
 });
 
+const userId = process.geteuid ? process.geteuid() : os.userInfo().username;
+const seedCache = async (temporaryDirectory: string) => {
+	const time = Math.floor(Date.now() / 1e8);
+	const cacheDirectory = path.join(temporaryDirectory, `tsx-${userId}`);
+	await fs.mkdir(cacheDirectory, { recursive: true });
+
+	// Bound concurrent writes so large cache fixtures don't exhaust file descriptors.
+	for (let start = 0; start < cacheEntries; start += 500) {
+		const end = Math.min(start + 500, cacheEntries);
+		await Promise.all(Array.from(
+			{ length: end - start },
+			(_, offset) => fs.writeFile(
+				path.join(
+					cacheDirectory,
+					`${time}-${(start + offset).toString(16).padStart(40, '0')}`,
+				),
+				'{}',
+			),
+		));
+	}
+
+	// Share seeded files with implementations that use the unscoped cache path.
+	await fs.symlink(cacheDirectory, path.join(temporaryDirectory, 'tsx'), 'junction');
+};
+
+const prepareTransformCache = async (
+	runsTsx: boolean,
+	isolatedCacheDirectory?: string,
+) => {
+	if (isolatedCacheDirectory) {
+		await seedCache(isolatedCacheDirectory);
+		return;
+	}
+
+	if (runsTsx) {
+		await clearTransformCache();
+	}
+};
+
 type Row = {
 	scenario: string;
 	nodeVersion: string;
@@ -116,20 +168,28 @@ const measureCell = async (
 ): Promise<RunResult[]> => {
 	const entryPath = path.join(fixturePath, scenario.entry);
 	const args = scenario.runner === 'tsx' ? [cliPath, entryPath] : [entryPath];
-	const usesCache = scenario.runner === 'tsx';
+	const runsTsx = scenario.runner === 'tsx';
+	await using cacheFixture = runsTsx && cacheEntries > 0
+		? await createFixture()
+		: undefined;
+	const cacheEnvironment = cacheFixture
+		? {
+			TMPDIR: cacheFixture.path,
+			TEMP: cacheFixture.path,
+			TMP: cacheFixture.path,
+		}
+		: undefined;
 
-	// Reset cache before warmup: avoids stale-file skew and cross-cell pollution
-	if (usesCache) {
-		await clearTransformCache();
-	}
-	await runOnce(node.path, args, fixturePath);
+	// Isolated mode retains its directory through warmup and timed runs.
+	await prepareTransformCache(runsTsx, cacheFixture?.path);
+	await runOnce(node.path, args, fixturePath, cacheEnvironment);
 
 	const results: RunResult[] = [];
 	for (let run = 0; run < runs; run += 1) {
-		if (usesCache && cold) {
+		if (runsTsx && cold) {
 			await clearTransformCache();
 		}
-		results.push(await runOnce(node.path, args, fixturePath));
+		results.push(await runOnce(node.path, args, fixturePath, cacheEnvironment));
 	}
 	return results;
 };
@@ -216,6 +276,7 @@ if (json) {
 		meta: {
 			runs,
 			cold,
+			cacheEntries,
 			scale,
 			specifier,
 		},
@@ -227,7 +288,11 @@ if (json) {
 
 function renderTables() {
 	out();
-	out(`${runs} runs/cell · ${cold ? 'cold' : 'warm'} cache · specifier=${specifier}`);
+	out(
+		`${runs} runs/cell · ${cold ? 'cold' : 'warm'} cache`
+		+ ` · tsx scenarios: ${cacheEntries} unrelated cache entries`
+		+ ` · specifier=${specifier}`,
+	);
 
 	for (const scenario of selectedScenarios) {
 		const scenarioRows = rows.filter(row => row.scenario === scenario.name);

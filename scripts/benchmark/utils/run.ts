@@ -36,10 +36,12 @@ export const runOnce = async (
 	nodePath: string,
 	args: string[],
 	cwd: string,
+	env?: NodeJS.ProcessEnv,
 ): Promise<RunResult> => {
 	const startTime = performance.now();
 	const result = await execa(nodePath, args, {
 		cwd,
+		env,
 		reject: false,
 	});
 	const wallMs = performance.now() - startTime;

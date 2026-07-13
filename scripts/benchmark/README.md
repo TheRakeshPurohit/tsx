@@ -9,6 +9,7 @@ pnpm benchmark                                   # all scenarios, current Node, 
 pnpm benchmark esm-ts --compare 4.21.0           # one scenario vs a released version
 pnpm benchmark hooks-passthrough --node 24.10.0  # async (worker) vs sync hooks (see below)
 pnpm benchmark esm-ts --scale                    # per-module cost + fixed startup tax
+pnpm benchmark esm-ts --cache-entries 10000      # warm lookup cost in a large cache
 pnpm --silent benchmark --json > results.json    # raw per-run data
 ```
 
@@ -49,6 +50,7 @@ Chosen from a full sweep. The four defaults cover distinct, high-signal axes wit
 | `-s, --specifier` | `esm-ts` import style: `ts`, `js`, `extensionless` | `ts` |
 | `-r, --runs` | Timed runs per cell | `5` |
 | `--cold` | Clear the tsx transform cache before every run | `false` |
+| `--cache-entries` | Seed tsx scenarios with N unrelated cache entries | `0` |
 | `--scale` | Sweep module counts 10/100/300/1000; report per-module cost + fixed tax | `false` |
 | `--json` | Emit raw per-run results as JSON (stdout) | `false` |
 
@@ -72,4 +74,4 @@ Scenarios below their `minNodeVersion` (e.g. `native-ts` under 22.18.0) are skip
 
 ## Reproducibility
 
-The tsx transform cache is reset before each cell's warmup to avoid stale-file skew (a large `$TMPDIR/tsx-<uid>` degrades warm runs via a linear cache scan). Runs are interleaved after warmup.
+The tsx transform cache is reset before each tsx scenario's warmup to avoid stale-file skew. Pass `--cache-entries` to instead create an isolated cache, seed it with unrelated entries, and retain it across warmup and timed runs. This mode measures cache initialization and warm lookup scaling without clearing or changing the user's cache. Node baseline scenarios are unaffected. Runs are interleaved after warmup.
