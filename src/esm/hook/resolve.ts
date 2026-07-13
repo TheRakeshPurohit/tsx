@@ -701,21 +701,21 @@ export const createResolve = (
 			return resolved;
 		}
 
-		// For TypeScript extensions that Node can't detect the format of
-		if (
-			(
-				!resolved.format
-				|| resolved.format === 'commonjs-typescript'
-				|| resolved.format === 'module-typescript'
-			)
-			// Filter out data: (sourcemaps)
-			&& resolved.url.startsWith(fileUrlPrefix)
-		) {
-			resolved.format = await getFormatFromFileUrl(resolved.url);
-			log(2, 'getFormatFromFileUrl', {
-				resolved,
-				format: resolved.format,
-			});
+		// Filter out data: (sourcemaps)
+		if (resolved.url.startsWith(fileUrlPrefix)) {
+			// Node already determined the module type to compute these formats.
+			if (resolved.format === 'module-typescript') {
+				resolved.format = 'module';
+			} else if (resolved.format === 'commonjs-typescript') {
+				resolved.format = 'commonjs';
+			} else if (!resolved.format) {
+				// Older Node versions and typeless .ts can return no format.
+				resolved.format = await getFormatFromFileUrl(resolved.url);
+				log(2, 'getFormatFromFileUrl', {
+					resolved,
+					format: resolved.format,
+				});
+			}
 		}
 
 		if (query) {
@@ -846,21 +846,21 @@ export const createResolveSync = (
 			return resolved;
 		}
 
-		// For TypeScript extensions that Node can't detect the format of
-		if (
-			(
-				!resolved.format
-				|| resolved.format === 'commonjs-typescript'
-				|| resolved.format === 'module-typescript'
-			)
-			// Filter out data: (sourcemaps)
-			&& resolved.url.startsWith(fileUrlPrefix)
-		) {
-			resolved.format = getFormatFromFileUrlSync(resolved.url);
-			log(2, 'getFormatFromFileUrlSync', {
-				resolved,
-				format: resolved.format,
-			});
+		// Filter out data: (sourcemaps)
+		if (resolved.url.startsWith(fileUrlPrefix)) {
+			// Node already determined the module type to compute these formats.
+			if (resolved.format === 'module-typescript') {
+				resolved.format = 'module';
+			} else if (resolved.format === 'commonjs-typescript') {
+				resolved.format = 'commonjs';
+			} else if (!resolved.format) {
+				// Older Node versions and typeless .ts can return no format.
+				resolved.format = getFormatFromFileUrlSync(resolved.url);
+				log(2, 'getFormatFromFileUrlSync', {
+					resolved,
+					format: resolved.format,
+				});
+			}
 		}
 
 		if (query) {

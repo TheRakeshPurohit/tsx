@@ -14,6 +14,7 @@ import { commonJsModeContracts } from './specs/commonjs-mode-contracts';
 import { nodeCapabilitiesSpec } from './specs/node-capabilities';
 import { versionSensitiveTests } from './specs/version-sensitive';
 import { resolutionPriority } from './specs/resolution-priority';
+import { esmHookResolve } from './specs/esm-hook-resolve';
 
 (async () => {
 	// Prevent stuck CI runs
@@ -24,6 +25,7 @@ import { resolutionPriority } from './specs/resolution-priority';
 		await processInteractSpec();
 		await transformSpec();
 		await nodeCapabilitiesSpec();
+		await esmHookResolve();
 
 		const [primaryNodeVersion, ...compatNodeVersions] = nodeVersions;
 		const primaryNode = await createNode(primaryNodeVersion);
